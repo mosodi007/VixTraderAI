@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity, Volume2, VolumeX } from 'lucide-react';
+import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity, Volume2, VolumeX, X } from 'lucide-react';
 import { SignalModal } from '../components/SignalModal';
 import { playNewSignalAlert, unlockAudio, unlockAudioSilent } from '../lib/soundAlert';
 
@@ -29,6 +29,7 @@ interface GroupedSignals {
 }
 
 const SOUND_ALERTS_STORAGE_KEY = 'vix-signal-sound-alerts';
+const TOAST_DURATION_MS = 6000;
 
 function getStoredSoundAlerts(): boolean {
   try {
@@ -44,10 +45,29 @@ export function Signals() {
   const [loading, setLoading] = useState(true);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [soundAlertsOn, setSoundAlertsOn] = useState(getStoredSoundAlerts());
+  const [toasts, setToasts] = useState<{ id: string; signal: Signal }[]>([]);
   const soundAlertsOnRef = useRef(soundAlertsOn);
   const previousSignalIdsRef = useRef<Set<string>>(new Set());
+  const toastTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   soundAlertsOnRef.current = soundAlertsOn;
+
+  const showNewSignalToast = useCallback((signal: Signal) => {
+    const id = `toast-${signal.id}-${Date.now()}`;
+    setToasts((prev) => [...prev, { id, signal }]);
+    const t = setTimeout(() => {
+      setToasts((prev) => prev.filter((x) => x.id !== id));
+      delete toastTimeoutsRef.current[id];
+    }, TOAST_DURATION_MS);
+    toastTimeoutsRef.current[id] = t;
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    const t = toastTimeoutsRef.current[id];
+    if (t) clearTimeout(t);
+    delete toastTimeoutsRef.current[id];
+    setToasts((prev) => prev.filter((x) => x.id !== id));
+  }, []);
 
   const handleSoundAlertsToggle = (on: boolean) => {
     setSoundAlertsOn(on);
@@ -89,6 +109,7 @@ export function Signals() {
 
         // Sound alert for new signal (only if user has enabled it)
         if (soundAlertsOnRef.current) playNewSignalAlert();
+        showNewSignalToast(newSignal);
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'signals' }, (payload) => {
         setSignals((prev) =>
@@ -112,8 +133,10 @@ export function Signals() {
       subscription.unsubscribe();
       clearInterval(priceMonitorInterval);
       clearInterval(pollInterval);
+      Object.values(toastTimeoutsRef.current).forEach(clearTimeout);
+      toastTimeoutsRef.current = {};
     };
-  }, [user]);
+  }, [user, showNewSignalToast]);
 
   const monitorSignalPrices = async () => {
     try {
@@ -164,6 +187,7 @@ export function Signals() {
       if (soundAlertsOnRef.current) {
         playNewSignalAlert();
       }
+      addedSignals.forEach((s: Signal) => showNewSignalToast(s));
     }
 
     setSignals(list);
@@ -352,6 +376,44 @@ export function Signals() {
             onClose={() => setSelectedSignal(null)}
           />
         )}
+
+        {/* Toast stack: bottom-right */}
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+          <div className="pointer-events-auto flex flex-col gap-2">
+            {toasts.map(({ id, signal }) => (
+              <div
+                key={id}
+                role="alert"
+                onClick={() => setSelectedSignal(signal)}
+                className="rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg dark:shadow-black/20 p-4 flex items-start gap-3 transition-all duration-300 cursor-pointer hover:border-emerald-500/50 dark:hover:border-emerald-500/50"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-slate-900 dark:text-white">New signal</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-300 mt-0.5">
+                    <span className={signal.direction === 'BUY' ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-red-600 dark:text-red-400 font-medium'}>
+                      {signal.direction}
+                    </span>
+                    {' '}{signal.mt5_symbol || signal.symbol} @ {signal.entry_price.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    TP: {(signal.tp1 ?? signal.take_profit).toFixed(2)} · SL: {signal.stop_loss.toFixed(2)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dismissToast(id);
+                  }}
+                  className="shrink-0 p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                  aria-label="Dismiss"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       </DashboardLayout>
     </ProtectedRoute>
   );

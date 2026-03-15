@@ -1,5 +1,5 @@
 import { TechnicalAnalyzer, TickData, Candle, TechnicalIndicators } from './technical-indicators.ts';
-import { getSlTpDistanceInPrice } from './symbol-sl-tp.ts';
+import { getPointSize } from './symbol-sl-tp.ts';
 
 export interface SignalTrigger {
   indicatorName: string;
@@ -34,14 +34,32 @@ export interface SignalDetectionResult {
   atr?: number;
 }
 
+/** Config: use points (per-symbol) when set; otherwise ATR multipliers. */
+export interface SignalDetectorConfig {
+  slPoints?: number;
+  tpPoints?: number;
+  atrSlMultiplier?: number;
+  atrTpMultiplier?: number;
+}
+
 export class AdvancedSignalDetector {
   private analyzer: TechnicalAnalyzer;
   private minTriggers: number = 3;
   private minConfidence: number = 55;
   private minRiskReward: number = 1.2;
+  private atrSlMultiplier: number;
+  private atrTpMultiplier: number;
+  private slPoints: number | null = null;
+  private tpPoints: number | null = null;
 
-  constructor(ticks: TickData[]) {
+  constructor(ticks: TickData[], config?: SignalDetectorConfig) {
     this.analyzer = new TechnicalAnalyzer(ticks);
+    this.atrSlMultiplier = config?.atrSlMultiplier ?? 1.5;
+    this.atrTpMultiplier = config?.atrTpMultiplier ?? 2.5;
+    if (config?.slPoints != null && config?.tpPoints != null && config.slPoints > 0 && config.tpPoints > 0) {
+      this.slPoints = config.slPoints;
+      this.tpPoints = config.tpPoints;
+    }
   }
 
   private ticksToCandles(ticks: TickData[], interval: number = 60): Candle[] {
@@ -278,52 +296,91 @@ export class AdvancedSignalDetector {
     atr: number,
     supportLevels: number[],
     resistanceLevels: number[],
-    symbol: string
+    _symbol: string
   ): { stopLoss: number; takeProfit: number; tp1: number; rr: number } {
-    const { slDistance, tpDistance } = getSlTpDistanceInPrice(symbol, entryPrice);
-    const riskAmount = slDistance; // strict 30-pip SL (no ATR blend)
+    const atrSafe = Math.max(atr, entryPrice * 0.001);
+    const symbol = _symbol?.trim() || '';
+    // When using points: convert Deriv "points" (display units) to price distance via point size.
+    const pointSize = getPointSize(symbol);
+    let slDistance = this.slPoints != null && this.tpPoints != null
+      ? this.slPoints * pointSize
+      : atrSafe * this.atrSlMultiplier;
+    let tpDistance = this.slPoints != null && this.tpPoints != null
+      ? this.tpPoints * pointSize
+      : atrSafe * this.atrTpMultiplier;
+
+    // Cap point-based distances so SL/TP stay valid (no negative or extreme levels)
+    if (this.slPoints != null && this.tpPoints != null) {
+      const maxSl = entryPrice * 0.5;
+      const maxTp = entryPrice * 2;
+      if (direction === 'BUY') {
+        slDistance = Math.min(slDistance, maxSl);
+        tpDistance = Math.min(tpDistance, maxTp);
+      } else {
+        slDistance = Math.min(slDistance, maxTp);
+        tpDistance = Math.min(tpDistance, maxSl);
+      }
+    }
 
     let stopLoss: number;
     let tp1: number;
 
+    const useFixedPoints = this.slPoints != null && this.tpPoints != null;
+
     if (direction === 'BUY') {
-      stopLoss = entryPrice - riskAmount;
+      stopLoss = entryPrice - slDistance;
       tp1 = entryPrice + tpDistance;
 
-      if (supportLevels.length > 0) {
-        const nearestSupport = supportLevels
-          .filter(s => s < entryPrice && s > stopLoss)
-          .sort((a, b) => b - a)[0];
-        if (nearestSupport) {
-          const candidateSL = nearestSupport - (atr * 0.5);
-          if (entryPrice - candidateSL >= riskAmount) {
-            stopLoss = candidateSL;
+      if (!useFixedPoints) {
+        if (supportLevels.length > 0) {
+          const nearestSupport = supportLevels
+            .filter(s => s < entryPrice && s > stopLoss)
+            .sort((a, b) => b - a)[0];
+          if (nearestSupport) {
+            const candidateSL = nearestSupport - (atrSafe * 0.5);
+            if (candidateSL < entryPrice && entryPrice - candidateSL >= slDistance * 0.5) {
+              stopLoss = candidateSL;
+            }
+          }
+        }
+        if (resistanceLevels.length > 0) {
+          const nearestResistance = resistanceLevels
+            .filter(r => r > entryPrice && r <= entryPrice + tpDistance * 1.5)
+            .sort((a, b) => a - b)[0];
+          if (nearestResistance) {
+            tp1 = Math.min(nearestResistance - (atrSafe * 0.3), entryPrice + tpDistance * 1.5);
           }
         }
       }
-      // Enforce minimum SL distance: never closer than riskAmount
-      if (entryPrice - stopLoss < riskAmount) {
-        stopLoss = entryPrice - riskAmount;
-      }
+      stopLoss = Math.max(0.01, Math.min(stopLoss, entryPrice - 0.01));
+      tp1 = Math.max(entryPrice + 0.01, tp1);
     } else {
-      stopLoss = entryPrice + riskAmount;
+      stopLoss = entryPrice + slDistance;
       tp1 = entryPrice - tpDistance;
 
-      if (resistanceLevels.length > 0) {
-        const nearestResistance = resistanceLevels
-          .filter(r => r > entryPrice && r < stopLoss)
-          .sort((a, b) => a - b)[0];
-        if (nearestResistance) {
-          const candidateSL = nearestResistance + (atr * 0.5);
-          if (candidateSL - entryPrice >= riskAmount) {
-            stopLoss = candidateSL;
+      if (!useFixedPoints) {
+        if (resistanceLevels.length > 0) {
+          const nearestResistance = resistanceLevels
+            .filter(r => r > entryPrice && r < stopLoss)
+            .sort((a, b) => a - b)[0];
+          if (nearestResistance) {
+            const candidateSL = nearestResistance + (atrSafe * 0.5);
+            if (candidateSL > entryPrice && candidateSL - entryPrice >= slDistance * 0.5) {
+              stopLoss = candidateSL;
+            }
+          }
+        }
+        if (supportLevels.length > 0) {
+          const nearestSupport = supportLevels
+            .filter(s => s < entryPrice && s >= entryPrice - tpDistance * 1.5)
+            .sort((a, b) => b - a)[0];
+          if (nearestSupport) {
+            tp1 = Math.max(nearestSupport + (atrSafe * 0.3), entryPrice - tpDistance * 1.5);
           }
         }
       }
-      // Enforce minimum SL distance: never closer than riskAmount
-      if (stopLoss - entryPrice < riskAmount) {
-        stopLoss = entryPrice + riskAmount;
-      }
+      tp1 = Math.max(0.01, Math.min(tp1, entryPrice - 0.01));
+      stopLoss = Math.max(entryPrice + 0.01, stopLoss);
     }
 
     const riskReward = Math.abs(tp1 - entryPrice) / Math.abs(stopLoss - entryPrice);
@@ -487,6 +544,6 @@ export class AdvancedSignalDetector {
   }
 }
 
-export function createSignalDetector(ticks: TickData[]): AdvancedSignalDetector {
-  return new AdvancedSignalDetector(ticks);
+export function createSignalDetector(ticks: TickData[], config?: SignalDetectorConfig): AdvancedSignalDetector {
+  return new AdvancedSignalDetector(ticks, config);
 }

@@ -194,47 +194,17 @@ Provide a concise trading analysis (2-3 sentences) explaining the key factors in
                      marketAnalysis.indicators.trend === 'bullish' ? 'BUY' : 'SELL';
 
     const entryPrice = marketAnalysis.currentPrice;
+    const atr = Math.max(marketAnalysis.indicators.atr ?? 0, entryPrice * 0.001);
+    const slDistance = atr * 1.5;
+    const tpDistance = atr * 2.5;
     const pipSize = this.calculatePipSize(symbol);
-    const atrMultiplier = marketAnalysis.indicators.volatility === 'high' ? 2.5 :
-                         marketAnalysis.indicators.volatility === 'low' ? 1.0 : 1.5;
-
-    let stopLossPips: number;
-    let takeProfitPips: number;
-
-    const atrPips = this.calculatePips(symbol, 0, marketAnalysis.indicators.atr);
-
-    if (atrPips > 0) {
-      stopLossPips = Math.round(atrPips * atrMultiplier);
-      takeProfitPips = Math.round(stopLossPips * 2);
-    } else {
-      if (timeframe === 'M1' || timeframe === 'M5') {
-        stopLossPips = 50;
-        takeProfitPips = 100;
-      } else if (timeframe === 'M15' || timeframe === 'M30') {
-        stopLossPips = 80;
-        takeProfitPips = 160;
-      } else if (timeframe === 'H1') {
-        stopLossPips = 120;
-        takeProfitPips = 240;
-      } else {
-        stopLossPips = 200;
-        takeProfitPips = 400;
-      }
-    }
-
-    // Ensure minimum stop loss for MT5 compatibility (especially for synthetic indices)
-    const minStopLossPips = 50;
-    if (stopLossPips < minStopLossPips) {
-      stopLossPips = minStopLossPips;
-      takeProfitPips = stopLossPips * 2;
-    }
 
     let stopLoss: number;
     let takeProfit: number;
 
     if (direction === 'BUY') {
-      stopLoss = entryPrice - (stopLossPips * pipSize);
-      takeProfit = entryPrice + (takeProfitPips * pipSize);
+      stopLoss = entryPrice - slDistance;
+      takeProfit = entryPrice + tpDistance;
 
       if (marketAnalysis.supportLevels.length > 0) {
         const nearestSupport = marketAnalysis.supportLevels.find(s => s < entryPrice);
@@ -250,8 +220,8 @@ Provide a concise trading analysis (2-3 sentences) explaining the key factors in
         }
       }
     } else {
-      stopLoss = entryPrice + (stopLossPips * pipSize);
-      takeProfit = entryPrice - (takeProfitPips * pipSize);
+      stopLoss = entryPrice + slDistance;
+      takeProfit = entryPrice - tpDistance;
 
       if (marketAnalysis.resistanceLevels.length > 0) {
         const nearestResistance = marketAnalysis.resistanceLevels.find(r => r > entryPrice);
@@ -268,8 +238,8 @@ Provide a concise trading analysis (2-3 sentences) explaining the key factors in
       }
     }
 
-    stopLossPips = this.calculatePips(symbol, entryPrice, stopLoss);
-    takeProfitPips = this.calculatePips(symbol, entryPrice, takeProfit);
+    const stopLossPips = this.calculatePips(symbol, entryPrice, stopLoss);
+    const takeProfitPips = this.calculatePips(symbol, entryPrice, takeProfit);
 
     const riskReward = this.calculateRiskReward(entryPrice, stopLoss, takeProfit, direction);
     const signalType = this.determineSignalType(marketAnalysis);

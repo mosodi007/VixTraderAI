@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { getPipSize } from "../_shared/symbol-sl-tp.ts";
+import { getSlTpDistanceInPrice } from "../_shared/symbol-sl-tp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -124,19 +124,18 @@ Provide a complete trading signal with entry, stop loss, and take profit levels.
     const entryPrice = analysis.entry_price || marketData.price;
     const confidence = Math.min(95, Math.max(60, analysis.confidence || 75));
 
-    const pipSize = getPipSize(symbol);
-    const stopLossPips = analysis.stop_loss_pips || getStopLossPips(symbol, marketData.volatility);
-    const takeProfitPips = analysis.take_profit_pips || (stopLossPips * (analysis.risk_reward_ratio || 2));
-
+    const { slDistance, tpDistance } = getSlTpDistanceInPrice(symbol);
     const stopLoss = direction === 'BUY'
-      ? entryPrice - (stopLossPips * pipSize)
-      : entryPrice + (stopLossPips * pipSize);
+      ? entryPrice - slDistance
+      : entryPrice + slDistance;
 
     const takeProfit = direction === 'BUY'
-      ? entryPrice + (takeProfitPips * pipSize)
-      : entryPrice - (takeProfitPips * pipSize);
+      ? entryPrice + tpDistance
+      : entryPrice - tpDistance;
 
     const tp1 = takeProfit;
+    const stopLossPips = 30;
+    const takeProfitPips = 60;
 
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + getSignalExpiry(timeframe));

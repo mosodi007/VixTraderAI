@@ -3,7 +3,23 @@ import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Save, AlertCircle, CheckCircle } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle, BarChart3 } from 'lucide-react';
+
+const SYMBOLS = ['R_10', 'R_50', 'R_100', '1HZ10V', '1HZ30V', '1HZ50V', '1HZ90V', '1HZ100V', 'stpRNG', 'JD25', 'STPIDX'] as const;
+
+const DEFAULT_POINTS: Record<string, { slPoints: number; tpPoints: number }> = {
+  R_10: { slPoints: 4000, tpPoints: 8000 },
+  R_50: { slPoints: 4000, tpPoints: 8000 },
+  R_100: { slPoints: 400, tpPoints: 800 },
+  '1HZ10V': { slPoints: 400, tpPoints: 800 },
+  '1HZ30V': { slPoints: 20000, tpPoints: 40000 },
+  '1HZ50V': { slPoints: 200000, tpPoints: 400000 },
+  '1HZ90V': { slPoints: 100000, tpPoints: 200000 },
+  '1HZ100V': { slPoints: 2000, tpPoints: 4000 },
+  stpRNG: { slPoints: 40, tpPoints: 80 },
+  JD25: { slPoints: 40000, tpPoints: 80000 },
+  STPIDX: { slPoints: 40, tpPoints: 80 },
+};
 
 export function Settings() {
   const { user } = useAuth();
@@ -14,8 +30,13 @@ export function Settings() {
   const [existingAccount, setExistingAccount] = useState<any>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const [symbolPoints, setSymbolPoints] = useState<Record<string, { slPoints: number; tpPoints: number }>>({});
+  const [pointsLoading, setPointsLoading] = useState(false);
+  const [pointsMessage, setPointsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   useEffect(() => {
     loadMt5Account();
+    loadSymbolPoints();
   }, [user]);
 
   const loadMt5Account = async () => {
@@ -32,6 +53,62 @@ export function Settings() {
       setMt5Login(data.mt5_login);
       setServer(data.server);
       setAccountType(data.account_type);
+    }
+  };
+
+  const loadSymbolPoints = async () => {
+    const { data } = await supabase.from('symbol_sl_tp_config').select('symbol, sl_points, tp_points');
+    const next: Record<string, { slPoints: number; tpPoints: number }> = {};
+    SYMBOLS.forEach((sym) => {
+      next[sym] = DEFAULT_POINTS[sym] ?? { slPoints: 400, tpPoints: 800 };
+    });
+    if (data?.length) {
+      data.forEach((row: { symbol: string; sl_points: number; tp_points: number }) => {
+        next[row.symbol] = {
+            slPoints: (Number(row.sl_points) || next[row.symbol]?.slPoints) ?? 400,
+            tpPoints: (Number(row.tp_points) || next[row.symbol]?.tpPoints) ?? 800,
+          };
+      });
+    }
+    setSymbolPoints(next);
+  };
+
+  const setPointsForSymbol = (symbol: string, field: 'slPoints' | 'tpPoints', value: number) => {
+    setSymbolPoints((prev) => ({
+      ...prev,
+      [symbol]: {
+        ...(prev[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 400, tpPoints: 800 }),
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleSaveSymbolPoints = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPointsLoading(true);
+    setPointsMessage(null);
+
+    try {
+      for (const symbol of SYMBOLS) {
+        const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 400, tpPoints: 800 };
+        const sl = Math.max(1, Math.round(Number(pts.slPoints)) || 400);
+        const tp = Math.max(1, Math.round(Number(pts.tpPoints)) || 800);
+
+        const { error } = await supabase
+          .from('symbol_sl_tp_config')
+          .upsert(
+            { symbol, sl_points: sl, tp_points: tp, updated_at: new Date().toISOString() },
+            { onConflict: 'symbol' }
+          );
+
+        if (error) throw error;
+      }
+
+      setPointsMessage({ type: 'success', text: 'Symbol SL/TP points saved. New signals will use these values.' });
+    } catch (error: any) {
+      setPointsMessage({ type: 'error', text: error.message || 'Failed to save symbol points' });
+    } finally {
+      setPointsLoading(false);
     }
   };
 
@@ -203,6 +280,85 @@ export function Settings() {
               >
                 <Save className="w-5 h-5" />
                 {loading ? 'Saving...' : existingAccount ? 'Update Account' : 'Submit for Verification'}
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-emerald-500" />
+              Symbol SL/TP Points
+            </h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
+              Set Stop Loss and Take Profit in points per symbol. Each symbol has its own scale; adjust these to find what works. Used by automated signal generation.
+            </p>
+
+            {pointsMessage && (
+              <div className={`flex items-center gap-3 p-4 rounded-lg mb-6 ${
+                pointsMessage.type === 'success'
+                  ? 'bg-emerald-500/10 border border-emerald-500/30'
+                  : 'bg-red-500/10 border border-red-500/30'
+              }`}>
+                {pointsMessage.type === 'success' ? (
+                  <CheckCircle className="w-5 h-5 text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-red-400" />
+                )}
+                <p className={`text-sm ${pointsMessage.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {pointsMessage.text}
+                </p>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveSymbolPoints} className="space-y-6">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-600">
+                      <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Symbol</th>
+                      <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">SL (points)</th>
+                      <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">TP (points)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {SYMBOLS.map((symbol) => {
+                      const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 400, tpPoints: 800 };
+                      return (
+                        <tr key={symbol} className="border-b border-slate-100 dark:border-slate-700/50">
+                          <td className="py-2 px-2 font-mono text-slate-900 dark:text-white">{symbol}</td>
+                          <td className="py-2 px-2">
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={pts.slPoints}
+                              onChange={(e) => setPointsForSymbol(symbol, 'slPoints', Number(e.target.value) || 1)}
+                              className="w-28 px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                          </td>
+                          <td className="py-2 px-2">
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={pts.tpPoints}
+                              onChange={(e) => setPointsForSymbol(symbol, 'tpPoints', Number(e.target.value) || 1)}
+                              className="w-28 px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <button
+                type="submit"
+                disabled={pointsLoading}
+                className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+              >
+                <Save className="w-5 h-5" />
+                {pointsLoading ? 'Saving...' : 'Save Symbol Points'}
               </button>
             </form>
           </div>

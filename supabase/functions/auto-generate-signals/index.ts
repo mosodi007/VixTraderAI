@@ -3,7 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createDerivAPI } from "../_shared/deriv-api.ts";
 import { createSignalDetector } from "../_shared/advanced-signal-detector.ts";
 import { refineSignalWithICT } from "../_shared/ict-signal-refiner.ts";
-import { getSlTpDistanceInPrice } from "../_shared/symbol-sl-tp.ts";
+import { SYMBOL_SL_TP_POINTS } from "../_shared/symbol-sl-tp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,7 +47,21 @@ Deno.serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // List of symbols to monitor (R_25, R_75 removed; 1HZ*, stpRNG, JD25 added)
+    // Fetch per-symbol SL/TP points from symbol_sl_tp_config (Settings page)
+    const { data: configRows } = await supabase.from('symbol_sl_tp_config').select('symbol, sl_points, tp_points');
+    const pointsBySymbol: Record<string, { slPoints: number; tpPoints: number }> = {};
+    if (configRows?.length) {
+      for (const row of configRows) {
+        const sl = Number(row.sl_points);
+        const tp = Number(row.tp_points);
+        if (Number.isFinite(sl) && Number.isFinite(tp) && sl > 0 && tp > 0) {
+          pointsBySymbol[row.symbol] = { slPoints: sl, tpPoints: tp };
+        }
+      }
+      console.log(`[AUTO-SCAN] Loaded points for ${Object.keys(pointsBySymbol).length} symbols from config`);
+    }
+
+    // List of symbols to monitor
     const symbols = ['R_10', 'R_50', 'R_100', '1HZ10V', '1HZ30V', '1HZ50V', '1HZ90V', '1HZ100V', 'stpRNG', 'JD25'];
     const timeframe = 'M1';
 
@@ -111,7 +125,8 @@ Deno.serve(async (req: Request) => {
         console.log(`[${symbol}] 🔍 STARTING ANALYSIS with ${ticks.length} ticks...`);
         console.log(`[${symbol}] Current Price: ${ticks[ticks.length - 1].quote}`);
 
-        const detector = createSignalDetector(ticks);
+        const points = pointsBySymbol[symbol] ?? SYMBOL_SL_TP_POINTS[symbol] ?? { slPoints: 400, tpPoints: 800 };
+        const detector = createSignalDetector(ticks, { slPoints: points.slPoints, tpPoints: points.tpPoints });
         const detection = detector.detectSignal(symbol, timeframe);
 
         console.log(`[${symbol}] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
@@ -190,11 +205,11 @@ Deno.serve(async (req: Request) => {
         }
 
         if (ictResult) {
-          const { slDistance } = getSlTpDistanceInPrice(symbol, ictResult.refined.entry_price);
+          const detectorSlDistance = Math.abs(detection.entryPrice - detection.stopLoss);
           const ictSlDistance = Math.abs(ictResult.refined.entry_price - ictResult.refined.stop_loss);
           const ictTpDistance = Math.abs(ictResult.refined.tp1 - ictResult.refined.entry_price);
-          const useIctSl = ictSlDistance >= slDistance;
-          const useIctTp = ictTpDistance >= slDistance * 1.5;
+          const useIctSl = detectorSlDistance > 0 && ictSlDistance >= detectorSlDistance * 0.5;
+          const useIctTp = detectorSlDistance > 0 && ictTpDistance >= detectorSlDistance * 0.75;
 
           entryPrice = ictResult.refined.entry_price;
           stopLoss = useIctSl ? ictResult.refined.stop_loss : detection.stopLoss;
@@ -205,6 +220,21 @@ Deno.serve(async (req: Request) => {
             console.log(`[${symbol}] 🎯 ICT refined but SL/TP too tight; using detector levels for ${!useIctSl ? 'SL' : ''} ${!useIctTp ? 'TP' : ''}`);
           }
           console.log(`[${symbol}] 🎯 ICT refined: Entry ${entryPrice}, SL ${stopLoss}, TP ${tp1}`);
+        }
+
+        // Ensure SL/TP are valid: positive and on correct side of entry (never negative or wrong side)
+        const dir = detection.direction;
+        const invalid =
+          stopLoss <= 0 ||
+          tp1 <= 0 ||
+          (dir === 'BUY' && (stopLoss >= entryPrice || tp1 <= entryPrice)) ||
+          (dir === 'SELL' && (tp1 >= entryPrice || stopLoss <= entryPrice));
+        if (invalid) {
+          console.warn(`[${symbol}] Invalid SL/TP levels (e.g. negative or wrong side), using detector levels`);
+          entryPrice = detection.entryPrice;
+          stopLoss = detection.stopLoss;
+          takeProfit = detection.takeProfit ?? detection.tp1 ?? 0;
+          tp1 = detection.tp1 ?? detection.takeProfit ?? 0;
         }
 
         // Get MT5 symbol mapping
