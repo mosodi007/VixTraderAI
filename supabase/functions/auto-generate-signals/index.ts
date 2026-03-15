@@ -139,9 +139,7 @@ Deno.serve(async (req: Request) => {
         if (detection.shouldGenerateSignal && detection.direction) {
           console.log(`[${symbol}] 💰 TRADE SETUP:`);
           console.log(`[${symbol}]   Entry: ${detection.entryPrice}`);
-          console.log(`[${symbol}]   TP1: ${detection.tp1}`);
-          console.log(`[${symbol}]   TP2: ${detection.tp2}`);
-          console.log(`[${symbol}]   TP3: ${detection.tp3}`);
+          console.log(`[${symbol}]   TP: ${detection.tp1}`);
           console.log(`[${symbol}]   SL: ${detection.stopLoss}`);
         } else {
           console.log(`[${symbol}] ⚠️ REASON: ${detection.reasoning.split('\n')[0]}`);
@@ -166,12 +164,10 @@ Deno.serve(async (req: Request) => {
         // ICT refinement: OpenAI acts as expert ICT trader (best-effort; never blocks signal creation)
         let entryPrice = detection.entryPrice;
         let stopLoss = detection.stopLoss;
-        let takeProfit = detection.takeProfit ?? 0;
+        let takeProfit = detection.takeProfit ?? detection.tp1 ?? 0;
         let tp1 = detection.tp1 ?? detection.takeProfit ?? 0;
-        let tp2 = detection.tp2 ?? tp1;
-        let tp3 = detection.tp3 ?? detection.takeProfit ?? tp1;
         let marketContext = detection.reasoning;
-        let ictResult: { refined: { entry_price: number; stop_loss: number; tp1: number; tp2: number; tp3: number }; reasoning: string } | null = null;
+        let ictResult: { refined: { entry_price: number; stop_loss: number; tp1: number }; reasoning: string } | null = null;
         try {
           ictResult = await refineSignalWithICT(openaiApiKey, {
             symbol,
@@ -185,8 +181,8 @@ Deno.serve(async (req: Request) => {
             initialEntry: detection.entryPrice,
             initialStopLoss: detection.stopLoss,
             initialTp1: detection.tp1 ?? detection.takeProfit ?? 0,
-            initialTp2: detection.tp2 ?? detection.tp1 ?? detection.takeProfit ?? 0,
-            initialTp3: detection.tp3 ?? detection.takeProfit ?? 0,
+            initialTp2: detection.tp1 ?? detection.takeProfit ?? 0,
+            initialTp3: detection.tp1 ?? detection.takeProfit ?? 0,
             triggerSummary: detection.triggers.map((t) => t.triggerCondition).join('; '),
           });
         } catch (ictErr: unknown) {
@@ -196,21 +192,19 @@ Deno.serve(async (req: Request) => {
         if (ictResult) {
           const { slDistance } = getSlTpDistanceInPrice(symbol, ictResult.refined.entry_price);
           const ictSlDistance = Math.abs(ictResult.refined.entry_price - ictResult.refined.stop_loss);
-          const ictTp1Distance = Math.abs(ictResult.refined.tp1 - ictResult.refined.entry_price);
+          const ictTpDistance = Math.abs(ictResult.refined.tp1 - ictResult.refined.entry_price);
           const useIctSl = ictSlDistance >= slDistance;
-          const useIctTp = ictTp1Distance >= slDistance * 1.5;
+          const useIctTp = ictTpDistance >= slDistance * 1.5;
 
           entryPrice = ictResult.refined.entry_price;
           stopLoss = useIctSl ? ictResult.refined.stop_loss : detection.stopLoss;
           tp1 = useIctTp ? ictResult.refined.tp1 : (detection.tp1 ?? detection.takeProfit ?? 0);
-          tp2 = useIctTp ? ictResult.refined.tp2 : (detection.tp2 ?? tp1);
-          tp3 = useIctTp ? ictResult.refined.tp3 : (detection.tp3 ?? detection.takeProfit ?? tp1);
-          takeProfit = tp3;
+          takeProfit = tp1;
           marketContext = `${detection.reasoning}\n\n[ICT Refinement] ${ictResult.reasoning}`;
           if (!useIctSl || !useIctTp) {
             console.log(`[${symbol}] 🎯 ICT refined but SL/TP too tight; using detector levels for ${!useIctSl ? 'SL' : ''} ${!useIctTp ? 'TP' : ''}`);
           }
-          console.log(`[${symbol}] 🎯 ICT refined: Entry ${entryPrice}, SL ${stopLoss}, TP1 ${tp1}`);
+          console.log(`[${symbol}] 🎯 ICT refined: Entry ${entryPrice}, SL ${stopLoss}, TP ${tp1}`);
         }
 
         // Get MT5 symbol mapping
@@ -222,7 +216,7 @@ Deno.serve(async (req: Request) => {
 
         const riskRewardRatio = Math.abs(tp1 - currentPrice) / Math.abs(currentPrice - stopLoss) || detection.riskRewardRatio;
 
-        // Create signal in database
+        // Create signal in database (single TP only; tp2/tp3 kept null for schema compatibility)
         const { data: newSignal, error: insertError } = await supabase
           .from('signals')
           .insert({
@@ -233,8 +227,8 @@ Deno.serve(async (req: Request) => {
             stop_loss: stopLoss,
             take_profit: takeProfit,
             tp1,
-            tp2,
-            tp3,
+            tp2: null,
+            tp3: null,
             pip_stop_loss: Math.abs(currentPrice - stopLoss),
             pip_take_profit: Math.abs(tp1 - currentPrice),
             risk_reward_ratio: riskRewardRatio,

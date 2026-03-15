@@ -76,24 +76,12 @@ export function PastSignals() {
   const getOutcomeBadge = (outcome: string | null) => {
     switch (outcome) {
       case 'tp1_hit':
+      case 'tp2_hit':
+      case 'tp3_hit':
         return (
           <span className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-600/20 text-emerald-400 rounded-full text-xs font-semibold">
             <Target className="w-3 h-3" />
-            TP1 Hit
-          </span>
-        );
-      case 'tp2_hit':
-        return (
-          <span className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-xs font-semibold">
-            <Target className="w-3 h-3" />
-            TP2 Hit
-          </span>
-        );
-      case 'tp3_hit':
-        return (
-          <span className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-400/20 text-emerald-200 rounded-full text-xs font-semibold">
-            <Target className="w-3 h-3" />
-            TP3 Hit
+            TP Hit
           </span>
         );
       case 'sl_hit':

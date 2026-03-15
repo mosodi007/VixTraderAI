@@ -138,9 +138,7 @@ export function LiveAnalysis() {
             addLog(signal.symbol, `📊 Trade Setup:`, 'success');
             addLog(signal.symbol, `   Direction: ${signal.direction}`, 'info');
             addLog(signal.symbol, `   Entry: ${signal.entry_price}`, 'info');
-            addLog(signal.symbol, `   TP1: ${signal.tp1}`, 'info');
-            addLog(signal.symbol, `   TP2: ${signal.tp2}`, 'info');
-            addLog(signal.symbol, `   TP3: ${signal.tp3}`, 'info');
+            addLog(signal.symbol, `   TP: ${signal.tp1 ?? signal.take_profit}`, 'info');
             addLog(signal.symbol, `   SL: ${signal.stop_loss}`, 'info');
             addLog(signal.symbol, `   R:R: ${signal.risk_reward_ratio}:1`, 'info');
             addLog(signal.symbol, `   Triggers: ${signal.trigger_count}`, 'info');

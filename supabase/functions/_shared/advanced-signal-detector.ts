@@ -26,8 +26,6 @@ export interface SignalDetectionResult {
   stopLoss: number;
   takeProfit: number;
   tp1?: number;
-  tp2?: number;
-  tp3?: number;
   reasoning: string;
   /** For ICT refinement: support/resistance from structure (when direction is set) */
   supportLevels?: number[];
@@ -281,20 +279,16 @@ export class AdvancedSignalDetector {
     supportLevels: number[],
     resistanceLevels: number[],
     symbol: string
-  ): { stopLoss: number; takeProfit: number; tp1: number; tp2: number; tp3: number; rr: number } {
-    const { slDistance, tp1Distance, tp2Distance, tp3Distance } = getSlTpDistanceInPrice(symbol, entryPrice);
+  ): { stopLoss: number; takeProfit: number; tp1: number; rr: number } {
+    const { slDistance, tpDistance } = getSlTpDistanceInPrice(symbol, entryPrice);
     const riskAmount = slDistance; // strict 30-pip SL (no ATR blend)
 
     let stopLoss: number;
     let tp1: number;
-    let tp2: number;
-    let tp3: number;
 
     if (direction === 'BUY') {
       stopLoss = entryPrice - riskAmount;
-      tp1 = entryPrice + tp1Distance;
-      tp2 = entryPrice + tp2Distance;
-      tp3 = entryPrice + tp3Distance;
+      tp1 = entryPrice + tpDistance;
 
       if (supportLevels.length > 0) {
         const nearestSupport = supportLevels
@@ -313,9 +307,7 @@ export class AdvancedSignalDetector {
       }
     } else {
       stopLoss = entryPrice + riskAmount;
-      tp1 = entryPrice - tp1Distance;
-      tp2 = entryPrice - tp2Distance;
-      tp3 = entryPrice - tp3Distance;
+      tp1 = entryPrice - tpDistance;
 
       if (resistanceLevels.length > 0) {
         const nearestResistance = resistanceLevels
@@ -338,10 +330,8 @@ export class AdvancedSignalDetector {
 
     return {
       stopLoss: parseFloat(stopLoss.toFixed(2)),
-      takeProfit: parseFloat(tp3.toFixed(2)),
+      takeProfit: parseFloat(tp1.toFixed(2)),
       tp1: parseFloat(tp1.toFixed(2)),
-      tp2: parseFloat(tp2.toFixed(2)),
-      tp3: parseFloat(tp3.toFixed(2)),
       rr: parseFloat(riskReward.toFixed(2))
     };
   }
@@ -440,8 +430,6 @@ export class AdvancedSignalDetector {
         stopLoss: slTp.stopLoss,
         takeProfit: slTp.takeProfit,
         tp1: slTp.tp1,
-        tp2: slTp.tp2,
-        tp3: slTp.tp3,
         reasoning,
         supportLevels: analysis.supportLevels,
         resistanceLevels: analysis.resistanceLevels,

@@ -241,38 +241,12 @@ export function SignalModal({ signal, onClose }: SignalModalProps) {
                       <p className="text-xs text-slate-600 dark:text-slate-400">Take Profit Levels</p>
                     </div>
                     <div className="space-y-2">
-                      {signal.tp1 && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-600 dark:text-slate-400">TP1:</span>
-                          <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                            {signal.tp1.toFixed(5)}
-                          </span>
-                        </div>
-                      )}
-                      {signal.tp2 && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-600 dark:text-slate-400">TP2:</span>
-                          <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                            {signal.tp2.toFixed(5)}
-                          </span>
-                        </div>
-                      )}
-                      {signal.tp3 && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-600 dark:text-slate-400">TP3:</span>
-                          <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                            {signal.tp3.toFixed(5)}
-                          </span>
-                        </div>
-                      )}
-                      {!signal.tp1 && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-600 dark:text-slate-400">TP:</span>
-                          <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                            {signal.take_profit.toFixed(5)}
-                          </span>
-                        </div>
-                      )}
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-slate-600 dark:text-slate-400">TP:</span>
+                        <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                          {(signal.tp1 ?? signal.take_profit).toFixed(5)}
+                        </span>
+                      </div>
                     </div>
                   </div>
 

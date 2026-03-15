@@ -318,7 +318,7 @@ export function Signals() {
                               <Target className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                               <span className="text-slate-600 dark:text-slate-400">TP:</span>
                               <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                                {signal.tp1 ? signal.tp1.toFixed(2) : signal.take_profit.toFixed(2)}
+                                {(signal.tp1 ?? signal.take_profit).toFixed(2)}
                               </span>
                             </div>
 
@@ -336,24 +336,6 @@ export function Signals() {
                               </span>
                             </div>
                           </div>
-
-                          {(signal.tp2 || signal.tp3) && (
-                            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-300 dark:border-slate-700/50 flex items-center gap-4 text-xs">
-                              <span className="text-slate-500">Additional Targets:</span>
-                              {signal.tp2 && (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-slate-600 dark:text-slate-400">TP2:</span>
-                                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{signal.tp2.toFixed(2)}</span>
-                                </div>
-                              )}
-                              {signal.tp3 && (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-slate-600 dark:text-slate-400">TP3:</span>
-                                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{signal.tp3.toFixed(2)}</span>
-                                </div>
-                              )}
-                            </div>
-                          )}
                         </div>
                       ))}
                     </div>

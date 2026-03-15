@@ -282,19 +282,7 @@ Provide a concise trading analysis (2-3 sentences) explaining the key factors in
 
     const marketContext = `${marketAnalysis.indicators.trend} trend with ${marketAnalysis.indicators.volatility} volatility. ${marketAnalysis.analysis}`;
 
-    const rewardDistance = direction === 'BUY'
-      ? (takeProfit - entryPrice)
-      : (entryPrice - takeProfit);
-
-    const tp1 = direction === 'BUY'
-      ? entryPrice + (rewardDistance * 0.33)
-      : entryPrice - (rewardDistance * 0.33);
-
-    const tp2 = direction === 'BUY'
-      ? entryPrice + (rewardDistance * 0.66)
-      : entryPrice - (rewardDistance * 0.66);
-
-    const tp3 = takeProfit;
+    const tp1 = takeProfit;
 
     return {
       symbol: mt5Symbol,
@@ -304,8 +292,8 @@ Provide a concise trading analysis (2-3 sentences) explaining the key factors in
       stop_loss: Number(stopLoss.toFixed(5)),
       take_profit: Number(takeProfit.toFixed(5)),
       tp1: Number(tp1.toFixed(5)),
-      tp2: Number(tp2.toFixed(5)),
-      tp3: Number(tp3.toFixed(5)),
+      tp2: 0,
+      tp3: 0,
       pip_stop_loss: Math.round(stopLossPips),
       pip_take_profit: Math.round(takeProfitPips),
       risk_reward_ratio: riskReward,

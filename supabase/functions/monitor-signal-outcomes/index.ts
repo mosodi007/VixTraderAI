@@ -100,20 +100,15 @@ Deno.serve(async (req: Request) => {
         }
 
         const currentPrice = ticks[ticks.length - 1].quote;
-        console.log(`[${signal.symbol}] Current: ${currentPrice}, Entry: ${signal.entry_price}, TP1: ${signal.tp1}, SL: ${signal.stop_loss}`);
+        const tp = signal.tp1 ?? signal.take_profit;
+        console.log(`[${signal.symbol}] Current: ${currentPrice}, Entry: ${signal.entry_price}, TP: ${tp}, SL: ${signal.stop_loss}`);
 
         let outcome: string | null = null;
         let profitLoss: number | null = null;
 
-        // Check if TP or SL hit
+        // Check if TP or SL hit (single TP only)
         if (signal.direction === 'BUY') {
-          if (currentPrice >= signal.tp3) {
-            outcome = 'TP3_HIT';
-            profitLoss = currentPrice - signal.entry_price;
-          } else if (currentPrice >= signal.tp2) {
-            outcome = 'TP2_HIT';
-            profitLoss = currentPrice - signal.entry_price;
-          } else if (currentPrice >= signal.tp1) {
+          if (currentPrice >= tp) {
             outcome = 'TP1_HIT';
             profitLoss = currentPrice - signal.entry_price;
           } else if (currentPrice <= signal.stop_loss) {
@@ -121,13 +116,7 @@ Deno.serve(async (req: Request) => {
             profitLoss = currentPrice - signal.entry_price;
           }
         } else if (signal.direction === 'SELL') {
-          if (currentPrice <= signal.tp3) {
-            outcome = 'TP3_HIT';
-            profitLoss = signal.entry_price - currentPrice;
-          } else if (currentPrice <= signal.tp2) {
-            outcome = 'TP2_HIT';
-            profitLoss = signal.entry_price - currentPrice;
-          } else if (currentPrice <= signal.tp1) {
+          if (currentPrice <= tp) {
             outcome = 'TP1_HIT';
             profitLoss = signal.entry_price - currentPrice;
           } else if (currentPrice >= signal.stop_loss) {

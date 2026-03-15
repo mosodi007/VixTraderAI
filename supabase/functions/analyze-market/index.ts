@@ -136,15 +136,7 @@ Provide a complete trading signal with entry, stop loss, and take profit levels.
       ? entryPrice + (takeProfitPips * pipSize)
       : entryPrice - (takeProfitPips * pipSize);
 
-    const tp1 = direction === 'BUY'
-      ? entryPrice + (takeProfitPips * pipSize * 0.4)
-      : entryPrice - (takeProfitPips * pipSize * 0.4);
-
-    const tp2 = direction === 'BUY'
-      ? entryPrice + (takeProfitPips * pipSize * 0.7)
-      : entryPrice - (takeProfitPips * pipSize * 0.7);
-
-    const tp3 = takeProfit;
+    const tp1 = takeProfit;
 
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + getSignalExpiry(timeframe));
@@ -160,8 +152,8 @@ Provide a complete trading signal with entry, stop loss, and take profit levels.
       stop_loss: stopLoss,
       take_profit: takeProfit,
       tp1,
-      tp2,
-      tp3,
+      tp2: null as number | null,
+      tp3: null as number | null,
       pip_stop_loss: stopLossPips,
       pip_take_profit: takeProfitPips,
       risk_reward_ratio: analysis.risk_reward_ratio || Math.round((takeProfitPips / stopLossPips) * 10) / 10,
