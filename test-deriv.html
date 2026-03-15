@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Deriv API</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <h1>Deriv API Diagnostics</h1>
+    <button onclick="testDiagnostics()">Test Diagnostics</button>
+    <button onclick="testGenerateSignals()">Test Generate Signals</button>
+    <pre id="output"></pre>
+
+    <script>
+        const SUPABASE_URL = 'https://iudouyfzyxuusbkwzkte.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1ZG91eWZ6eXh1dXNia3d6a3RlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzYzMjgxOTgsImV4cCI6MjA1MTkwNDE5OH0.iIvEWJxVQmT6zXvT3xWMM8hSUE9VJwFIhqZd2vcqpQI';
+
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        async function testDiagnostics() {
+            try {
+                const output = document.getElementById('output');
+                output.textContent = 'Testing...\n';
+
+                const { data: { session } } = await supabase.auth.getSession();
+
+                output.textContent += `Session exists: ${!!session}\n`;
+                output.textContent += `User: ${session?.user?.email || 'Not logged in'}\n\n`;
+
+                if (!session) {
+                    output.textContent += 'Please log in to the app first!\n';
+                    return;
+                }
+
+                const response = await fetch(
+                    `${SUPABASE_URL}/functions/v1/test-deriv`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${session.access_token}`,
+                            'Content-Type': 'application/json',
+                        },
+                    }
+                );
+
+                const result = await response.json();
+                output.textContent += 'Response:\n' + JSON.stringify(result, null, 2);
+            } catch (error) {
+                document.getElementById('output').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function testGenerateSignals() {
+            try {
+                const output = document.getElementById('output');
+                output.textContent = 'Testing generate-signals...\n';
+
+                const { data: { session } } = await supabase.auth.getSession();
+
+                if (!session) {
+                    output.textContent += 'Please log in to the app first!\n';
+                    return;
+                }
+
+                const response = await fetch(
+                    `${SUPABASE_URL}/functions/v1/generate-signals`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${session.access_token}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            symbols: ['R_10'],
+                            timeframe: 'M15',
+                            count: 1,
+                        }),
+                    }
+                );
+
+                output.textContent += `Status: ${response.status}\n`;
+                const result = await response.json();
+                output.textContent += 'Response:\n' + JSON.stringify(result, null, 2);
+            } catch (error) {
+                document.getElementById('output').textContent += '\nError: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>
