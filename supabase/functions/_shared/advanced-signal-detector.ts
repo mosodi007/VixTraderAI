@@ -54,8 +54,8 @@ export class AdvancedSignalDetector {
 
   constructor(ticks: TickData[], config?: SignalDetectorConfig) {
     this.analyzer = new TechnicalAnalyzer(ticks);
-    this.atrSlMultiplier = config?.atrSlMultiplier ?? 1.5;
-    this.atrTpMultiplier = config?.atrTpMultiplier ?? 2.5;
+    this.atrSlMultiplier = config?.atrSlMultiplier ?? 2.5;
+    this.atrTpMultiplier = config?.atrTpMultiplier ?? 4.5;
     if (config?.slPoints != null && config?.tpPoints != null && config.slPoints > 0 && config.tpPoints > 0) {
       this.slPoints = config.slPoints;
       this.tpPoints = config.tpPoints;

@@ -195,7 +195,7 @@ Deno.serve(async (req: Request) => {
         // Convert pending setup into live signal
         const mt5Symbol = derivAPI.getMT5Symbol(symbol);
         const risk = Math.abs(suggestedEntry - stopLoss);
-        const riskRewardRatio = risk > 0 ? 2 : 0;
+        const riskRewardRatio = risk > 0 ? 3 : 0;
 
         const { data: newSignal, error: insertError } = await supabase
           .from("signals")

@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity, Volume2, VolumeX, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity, Volume2, VolumeX, Play } from 'lucide-react';
 import { SignalModal } from '../components/SignalModal';
 import { playNewSignalAlert, unlockAudio, unlockAudioSilent } from '../lib/soundAlert';
 
@@ -29,7 +29,251 @@ interface GroupedSignals {
 }
 
 const SOUND_ALERTS_STORAGE_KEY = 'vix-signal-sound-alerts';
-const TOAST_DURATION_MS = 6000;
+
+interface AnalysisLogEntry {
+  timestamp: string;
+  symbol: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  message: string;
+}
+
+function LiveAnalysisConsoleInline() {
+  const [results, setResults] = useState<any | null>(null);
+  const [logs, setLogs] = useState<AnalysisLogEntry[]>([]);
+  const [nextScanTime, setNextScanTime] = useState<string | null>(null);
+  const [timeUntilScan, setTimeUntilScan] = useState<string>('');
+  const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(true);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const hasRunInitialScan = useRef(false);
+
+  const addLog = (symbol: string, message: string, type: AnalysisLogEntry['type'] = 'info') => {
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+    setLogs((prev) => [...prev, { timestamp, symbol, type, message }]);
+  };
+
+  const fetchSchedule = async () => {
+    try {
+      const { data } = await supabase
+        .from('scan_schedule')
+        .select('next_scan_at, scan_interval_minutes')
+        .eq('id', '00000000-0000-0000-0000-000000000001')
+        .maybeSingle();
+
+      if (data?.next_scan_at) {
+        setNextScanTime(data.next_scan_at);
+      }
+    } catch (error) {
+      console.error('[LIVE ANALYSIS] Failed to fetch schedule', error);
+    }
+  };
+
+  const updateCountdown = () => {
+    if (!nextScanTime) return;
+    const now = new Date();
+    const next = new Date(nextScanTime);
+    const diff = next.getTime() - now.getTime();
+
+    if (diff <= 0) {
+      setTimeUntilScan('Scanning now...');
+      if (autoScanEnabled && !isAnalyzing) {
+        runAnalysis();
+      }
+      fetchSchedule();
+    } else {
+      const minutes = Math.floor(diff / 60000);
+      const seconds = Math.floor((diff % 60000) / 1000);
+      setTimeUntilScan(`${minutes}m ${seconds}s`);
+    }
+  };
+
+  useEffect(() => {
+    fetchSchedule();
+    const interval = setInterval(fetchSchedule, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [nextScanTime, autoScanEnabled, isAnalyzing]);
+
+  useEffect(() => {
+    if (hasRunInitialScan.current) return;
+    hasRunInitialScan.current = true;
+    const t = setTimeout(() => runAnalysis(), 800);
+    return () => clearTimeout(t);
+  }, []);
+
+  const runAnalysis = async () => {
+    setIsAnalyzing(true);
+    setLogs([]);
+    setResults(null);
+
+    addLog('SYSTEM', 'Starting automated signal analysis...', 'info');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        addLog('SYSTEM', 'Not authenticated. Please log in.', 'error');
+        setIsAnalyzing(false);
+        return;
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auto-generate-signals`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          }
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        addLog('SYSTEM', `Scan complete! Generated ${data.stats?.signals_generated ?? 0} signals`, 'success');
+        setResults(data);
+
+        if (Array.isArray(data.results)) {
+          data.results.forEach((result: any) => {
+            if (result.signalGenerated) {
+              addLog(result.symbol, `✅ SIGNAL: ${result.direction} - ${result.confidence}% confidence`, 'success');
+            } else {
+              addLog(result.symbol, `❌ ${result.reason}`, 'warning');
+            }
+          });
+        }
+
+        if (Array.isArray(data.generatedSignals) && data.generatedSignals.length > 0) {
+          addLog('SYSTEM', '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'info');
+          data.generatedSignals.forEach((signal: any) => {
+            addLog(signal.symbol, `📊 Trade Setup:`, 'success');
+            addLog(signal.symbol, `   Direction: ${signal.direction}`, 'info');
+            addLog(signal.symbol, `   Entry: ${signal.entry_price}`, 'info');
+            addLog(signal.symbol, `   TP: ${signal.tp1 ?? signal.take_profit}`, 'info');
+            addLog(signal.symbol, `   SL: ${signal.stop_loss}`, 'info');
+            addLog(signal.symbol, `   R:R: ${signal.risk_reward_ratio}:1`, 'info');
+            addLog(signal.symbol, `   Triggers: ${signal.trigger_count}`, 'info');
+          });
+        }
+      } else {
+        addLog('SYSTEM', `Error: ${data.error}`, 'error');
+      }
+    } catch (error: any) {
+      addLog('SYSTEM', `Failed: ${error.message}`, 'error');
+    } finally {
+      setIsAnalyzing(false);
+      fetchSchedule();
+    }
+  };
+
+  const getLogColor = (type: AnalysisLogEntry['type']) => {
+    switch (type) {
+      case 'success': return 'text-emerald-600 dark:text-emerald-400';
+      case 'warning': return 'text-amber-600 dark:text-amber-400';
+      case 'error': return 'text-red-600 dark:text-red-400';
+      default: return 'text-slate-600 dark:text-slate-400';
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-bold text-black dark:text-white mb-1">Live Analysis Console</h3>
+          <p className="text-sm text-slate-600 dark:text-slate-400">Watch the AI analyze markets in real-time</p>
+        </div>
+        <div className="flex items-center gap-4">
+          {nextScanTime && (
+            <div className="bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Clock className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                <span className="text-xs text-slate-600 dark:text-slate-400">Next Scan In</span>
+              </div>
+              <p className="text-lg font-bold text-black dark:text-white">{timeUntilScan}</p>
+            </div>
+          )}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoScanEnabled}
+              onChange={(e) => setAutoScanEnabled(e.target.checked)}
+              className="w-4 h-4 text-emerald-600 bg-slate-100 border-slate-300 rounded focus:ring-emerald-500 dark:focus:ring-emerald-600 dark:ring-offset-slate-800 focus:ring-2 dark:bg-slate-700 dark:border-slate-600"
+            />
+            <span className="text-sm text-slate-600 dark:text-slate-400">Auto-scan</span>
+          </label>
+          <button
+            onClick={runAnalysis}
+            disabled={isAnalyzing}
+            className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white font-medium rounded-lg transition-colors shadow-lg"
+          >
+            {isAnalyzing ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <Play className="w-5 h-5" />
+                Run Analysis
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {results && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-xl p-6">
+            <div className="flex items-center gap-3 mb-2">
+              <h4 className="font-semibold text-black dark:text-white">Symbols Analyzed</h4>
+            </div>
+            <p className="text-3xl font-bold text-black dark:text-white">{results.stats?.total_scanned ?? 0}</p>
+          </div>
+
+          <div className="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 rounded-xl p-6">
+            <div className="flex items-center gap-3 mb-2">
+              <h4 className="font-semibold text-emerald-700 dark:text-emerald-300">Signals Found</h4>
+            </div>
+            <p className="text-3xl font-bold text-emerald-700 dark:text-emerald-300">{results.stats?.signals_generated ?? 0}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-slate-900 dark:bg-slate-950 border border-slate-700 rounded-xl overflow-hidden shadow-xl">
+        <div className="bg-slate-800 dark:bg-slate-900 px-4 py-3 border-b border-slate-700 flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full bg-red-500"></div>
+          <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+          <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+          <span className="ml-4 text-sm font-mono text-slate-400">analysis.log</span>
+        </div>
+
+        <div className="p-6 font-mono text-sm space-y-2 max-h-[600px] overflow-y-auto">
+          {logs.length === 0 ? (
+            <div className="text-slate-500 text-center py-12">
+              <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>Starting automatic analysis...</p>
+              <p className="text-xs mt-2 opacity-75">
+                Scans also run every 1 min in the background. Enable Auto-scan to run again when the timer hits zero.
+              </p>
+            </div>
+          ) : (
+            logs.map((log, idx) => (
+              <div key={idx} className="flex gap-3 hover:bg-slate-800/50 px-2 py-1 rounded">
+                <span className="text-slate-500 text-xs">{log.timestamp}</span>
+                <span className="text-sky-400 font-semibold min-w-[80px]">[{log.symbol}]</span>
+                <span className={getLogColor(log.type)}>{log.message}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function getStoredSoundAlerts(): boolean {
   try {
@@ -45,29 +289,11 @@ export function Signals() {
   const [loading, setLoading] = useState(true);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [soundAlertsOn, setSoundAlertsOn] = useState(getStoredSoundAlerts());
-  const [toasts, setToasts] = useState<{ id: string; signal: Signal }[]>([]);
   const soundAlertsOnRef = useRef(soundAlertsOn);
   const previousSignalIdsRef = useRef<Set<string>>(new Set());
-  const toastTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [showLiveAnalysis, setShowLiveAnalysis] = useState(false);
 
   soundAlertsOnRef.current = soundAlertsOn;
-
-  const showNewSignalToast = useCallback((signal: Signal) => {
-    const id = `toast-${signal.id}-${Date.now()}`;
-    setToasts((prev) => [...prev, { id, signal }]);
-    const t = setTimeout(() => {
-      setToasts((prev) => prev.filter((x) => x.id !== id));
-      delete toastTimeoutsRef.current[id];
-    }, TOAST_DURATION_MS);
-    toastTimeoutsRef.current[id] = t;
-  }, []);
-
-  const dismissToast = useCallback((id: string) => {
-    const t = toastTimeoutsRef.current[id];
-    if (t) clearTimeout(t);
-    delete toastTimeoutsRef.current[id];
-    setToasts((prev) => prev.filter((x) => x.id !== id));
-  }, []);
 
   const handleSoundAlertsToggle = (on: boolean) => {
     setSoundAlertsOn(on);
@@ -109,7 +335,6 @@ export function Signals() {
 
         // Sound alert for new signal (only if user has enabled it)
         if (soundAlertsOnRef.current) playNewSignalAlert();
-        showNewSignalToast(newSignal);
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'signals' }, (payload) => {
         setSignals((prev) =>
@@ -133,10 +358,8 @@ export function Signals() {
       subscription.unsubscribe();
       clearInterval(priceMonitorInterval);
       clearInterval(pollInterval);
-      Object.values(toastTimeoutsRef.current).forEach(clearTimeout);
-      toastTimeoutsRef.current = {};
     };
-  }, [user, showNewSignalToast]);
+  }, [user]);
 
   const monitorSignalPrices = async () => {
     try {
@@ -187,7 +410,6 @@ export function Signals() {
       if (soundAlertsOnRef.current) {
         playNewSignalAlert();
       }
-      addedSignals.forEach((s: Signal) => showNewSignalToast(s));
     }
 
     setSignals(list);
@@ -239,6 +461,14 @@ export function Signals() {
             <h2 className="text-3xl font-bold text-black dark:text-white mb-2">Deriv Live Signals</h2>
             <p className="text-slate-600 dark:text-slate-400">AI-powered trading signals appear here automatically</p>
           </div>
+          <button
+            type="button"
+            onClick={() => setShowLiveAnalysis((prev) => !prev)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+          >
+            <Activity className="w-4 h-4" />
+            {showLiveAnalysis ? 'Hide Live Analysis Console' : 'Show Live Analysis Console'}
+          </button>
 
           <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-lg dark:shadow-none">
             <div className="p-6 border-b border-slate-300 dark:border-slate-700">
@@ -342,7 +572,7 @@ export function Signals() {
                               <Target className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                               <span className="text-slate-600 dark:text-slate-400">TP:</span>
                               <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                                {(signal.tp1 ?? signal.take_profit).toFixed(2)}
+                                {signal.tp1 ? signal.tp1.toFixed(2) : signal.take_profit.toFixed(2)}
                               </span>
                             </div>
 
@@ -360,6 +590,24 @@ export function Signals() {
                               </span>
                             </div>
                           </div>
+
+                          {/* {(signal.tp2 || signal.tp3) && (
+                            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-300 dark:border-slate-700/50 flex items-center gap-4 text-xs">
+                              <span className="text-slate-500">Additional Targets:</span>
+                              {signal.tp2 && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-slate-600 dark:text-slate-400">TP2:</span>
+                                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{signal.tp2.toFixed(2)}</span>
+                                </div>
+                              )}
+                              {signal.tp3 && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-slate-600 dark:text-slate-400">TP3:</span>
+                                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{signal.tp3.toFixed(2)}</span>
+                                </div>
+                              )}
+                            </div>
+                          )} */}
                         </div>
                       ))}
                     </div>
@@ -368,6 +616,8 @@ export function Signals() {
               </div>
             )}
           </div>
+
+          {showLiveAnalysis && <LiveAnalysisConsoleInline />}
         </div>
 
         {selectedSignal && (
@@ -376,44 +626,6 @@ export function Signals() {
             onClose={() => setSelectedSignal(null)}
           />
         )}
-
-        {/* Toast stack: bottom-right */}
-        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
-          <div className="pointer-events-auto flex flex-col gap-2">
-            {toasts.map(({ id, signal }) => (
-              <div
-                key={id}
-                role="alert"
-                onClick={() => setSelectedSignal(signal)}
-                className="rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg dark:shadow-black/20 p-4 flex items-start gap-3 transition-all duration-300 cursor-pointer hover:border-emerald-500/50 dark:hover:border-emerald-500/50"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-slate-900 dark:text-white">New signal</p>
-                  <p className="text-sm text-slate-600 dark:text-slate-300 mt-0.5">
-                    <span className={signal.direction === 'BUY' ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-red-600 dark:text-red-400 font-medium'}>
-                      {signal.direction}
-                    </span>
-                    {' '}{signal.mt5_symbol || signal.symbol} @ {signal.entry_price.toFixed(2)}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    TP: {(signal.tp1 ?? signal.take_profit).toFixed(2)} · SL: {signal.stop_loss.toFixed(2)}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    dismissToast(id);
-                  }}
-                  className="shrink-0 p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                  aria-label="Dismiss"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
       </DashboardLayout>
     </ProtectedRoute>
   );

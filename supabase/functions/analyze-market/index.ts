@@ -288,6 +288,7 @@ function getMT5Symbol(symbol: string): string {
     '1HZ10V': 'Volatility 10 (1s) Index',
     '1HZ30V': 'Volatility 30 (1s) Index',
     '1HZ50V': 'Volatility 50 (1s) Index',
+    '1HZ75V': 'Volatility 75 (1s) Index',
     '1HZ90V': 'Volatility 90 (1s) Index',
     '1HZ100V': 'Volatility 100 (1s) Index',
     '1HZ200V': 'Volatility 200 (1s) Index',

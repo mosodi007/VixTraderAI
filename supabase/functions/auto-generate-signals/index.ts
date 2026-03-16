@@ -62,7 +62,8 @@ Deno.serve(async (req: Request) => {
     }
 
     // List of symbols to monitor
-    const symbols = ['R_10', 'R_50', 'R_100', '1HZ10V', '1HZ30V', '1HZ50V', '1HZ90V', '1HZ100V', 'stpRNG', 'JD25'];
+    // Removed: R_10, R_50, 1HZ50V, 1HZ90V, JD25
+    const symbols = ['R_100', '1HZ10V', '1HZ30V', '1HZ75V', 'stpRNG'];
     const timeframe = 'M1';
 
     const results: AutoSignalResult[] = [];
@@ -210,9 +211,9 @@ Deno.serve(async (req: Request) => {
           console.log(`[${symbol}] ICT refined: Entry ${entryPrice}, SL ${stopLoss}`);
         }
 
-        // Enforce minimum SL distance (enough room): min_sl_distance = max(1*ATR, pointSize*15)
+        // Enforce minimum SL distance (enough room): min_sl_distance = max(2*ATR, pointSize*30)
         const pointSize = getPointSize(symbol);
-        const minSlDistance = Math.max(atr, pointSize * 15);
+        const minSlDistance = Math.max(atr * 3, pointSize * 80);
         const slDistance = Math.abs(entryPrice - stopLoss);
         if (slDistance < minSlDistance) {
           if (detection.direction === 'BUY') {
@@ -223,9 +224,9 @@ Deno.serve(async (req: Request) => {
           console.log(`[${symbol}] SL nudged to meet min distance: ${minSlDistance.toFixed(2)}`);
         }
 
-        // Enforce 1:2 risk-to-reward: TP = entry ± 2 * risk
+        // Enforce 1:3 risk-to-reward: TP = entry ± 3 * risk
         const risk = Math.abs(entryPrice - stopLoss);
-        let tp1 = detection.direction === 'BUY' ? entryPrice + 2 * risk : entryPrice - 2 * risk;
+        let tp1 = detection.direction === 'BUY' ? entryPrice + 3 * risk : entryPrice - 3 * risk;
 
         // Ensure SL/TP valid (positive, correct side of entry)
         const dir = detection.direction;
@@ -238,8 +239,8 @@ Deno.serve(async (req: Request) => {
           console.warn(`[${symbol}] Invalid SL/TP after enforcement; using detector levels`);
           entryPrice = detection.entryPrice;
           stopLoss = detection.stopLoss;
-          const riskFallback = Math.abs(entryPrice - stopLoss) || atr;
-          tp1 = detection.direction === 'BUY' ? entryPrice + 2 * riskFallback : entryPrice - 2 * riskFallback;
+          const riskFallback = Math.abs(entryPrice - stopLoss) || atr * 3;
+          tp1 = detection.direction === 'BUY' ? entryPrice + 3 * riskFallback : entryPrice - 3 * riskFallback;
         }
         const takeProfitFinal = tp1;
 
@@ -252,7 +253,7 @@ Deno.serve(async (req: Request) => {
         const atEntry = Math.abs(currentPrice - entryPrice) <= entryTolerance;
 
         const expiresAt = new Date('2099-12-31T23:59:59Z');
-        const riskRewardRatio = 2;
+        const riskRewardRatio = 3;
 
         if (atEntry) {
           // Price at entry: create signal immediately
@@ -418,3 +419,4 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
