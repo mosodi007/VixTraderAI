@@ -1,7 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createDerivAPI } from "../_shared/deriv-api.ts";
-import { getPointSize } from "../_shared/symbol-sl-tp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,12 +42,13 @@ Deno.serve(async (req: Request) => {
 
     console.log(`[MONITOR] Starting signal outcome monitoring at ${new Date().toISOString()}`);
 
-    // Get all active signals (no time expiry – monitor until SL or TP hit)
+    // Get all active signals
     const { data: activeSignals, error: fetchError } = await supabase
       .from('signals')
       .select('*')
       .eq('is_active', true)
-      .eq('signal_status', 'ACTIVE');
+      .eq('signal_status', 'ACTIVE')
+      .gt('expires_at', new Date().toISOString());
 
     if (fetchError) {
       throw fetchError;
@@ -84,8 +84,8 @@ Deno.serve(async (req: Request) => {
       try {
         console.log(`[${signal.symbol}] Checking signal ${signal.id} (${signal.direction})`);
 
-        // Get current market price (fetch a few ticks and use the latest by epoch)
-        const ticks = await derivAPI.getTickHistory(signal.symbol, 5);
+        // Get current market price
+        const ticks = await derivAPI.getTickHistory(signal.symbol, 1);
 
         if (!ticks || ticks.length === 0) {
           console.log(`[${signal.symbol}] Unable to fetch current price`);
@@ -100,68 +100,76 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
-        // Use the most recent tick by epoch (Deriv may return oldest-first or newest-first)
-        const sortedTicks = [...ticks].sort((a, b) => (b.epoch ?? 0) - (a.epoch ?? 0));
-        const currentPrice = Number(sortedTicks[0].quote);
-        const entryPrice = Number(signal.entry_price);
-        const stopLoss = Number(signal.stop_loss);
-        const tp = Number(signal.tp1 ?? signal.take_profit);
-
-        const pointSize = getPointSize(signal.symbol);
-        // Require price to have passed the level by at least one point (avoids false TP hit from noise/rounding)
-        const tpBuffer = pointSize;
-
-        console.log(`[${signal.symbol}] Current: ${currentPrice}, Entry: ${entryPrice}, TP: ${tp}, SL: ${stopLoss}`);
+        const currentPrice = ticks[ticks.length - 1].quote;
+        console.log(`[${signal.symbol}] Current: ${currentPrice}, Entry: ${signal.entry_price}, TP1: ${signal.tp1}, SL: ${signal.stop_loss}`);
 
         let outcome: string | null = null;
         let profitLoss: number | null = null;
 
-        // Check if TP or SL hit (single TP only). Sanity: TP must be on correct side of entry.
+        // Check if TP or SL hit
         if (signal.direction === 'BUY') {
-          const tpValid = tp > entryPrice;
-          const slValid = stopLoss < entryPrice;
-          if (tpValid && slValid && currentPrice >= tp + tpBuffer) {
+          if (currentPrice >= signal.tp3) {
+            outcome = 'TP3_HIT';
+            profitLoss = currentPrice - signal.entry_price;
+          } else if (currentPrice >= signal.tp2) {
+            outcome = 'TP2_HIT';
+            profitLoss = currentPrice - signal.entry_price;
+          } else if (currentPrice >= signal.tp1) {
             outcome = 'TP1_HIT';
-            profitLoss = currentPrice - entryPrice;
-          } else if (slValid && currentPrice <= stopLoss) {
+            profitLoss = currentPrice - signal.entry_price;
+          } else if (currentPrice <= signal.stop_loss) {
             outcome = 'SL_HIT';
-            profitLoss = currentPrice - entryPrice;
+            profitLoss = currentPrice - signal.entry_price;
           }
         } else if (signal.direction === 'SELL') {
-          const tpValid = tp < entryPrice;
-          const slValid = stopLoss > entryPrice;
-          if (tpValid && slValid && currentPrice <= tp - tpBuffer) {
+          if (currentPrice <= signal.tp3) {
+            outcome = 'TP3_HIT';
+            profitLoss = signal.entry_price - currentPrice;
+          } else if (currentPrice <= signal.tp2) {
+            outcome = 'TP2_HIT';
+            profitLoss = signal.entry_price - currentPrice;
+          } else if (currentPrice <= signal.tp1) {
             outcome = 'TP1_HIT';
-            profitLoss = entryPrice - currentPrice;
-          } else if (slValid && currentPrice >= stopLoss) {
+            profitLoss = signal.entry_price - currentPrice;
+          } else if (currentPrice >= signal.stop_loss) {
             outcome = 'SL_HIT';
-            profitLoss = entryPrice - currentPrice;
+            profitLoss = signal.entry_price - currentPrice;
           }
         }
 
         if (outcome) {
           console.log(`[${signal.symbol}] ✓ Outcome detected: ${outcome} (P/L: ${profitLoss})`);
 
-          // Close signal with outcome using new function
-          await supabase.rpc('update_signal_outcome', {
+          // Close signal with outcome using DB function (must succeed for signal to leave Active list)
+          const { error: rpcError } = await supabase.rpc('update_signal_outcome', {
             p_signal_id: signal.id,
             p_outcome: outcome,
             p_close_price: currentPrice,
             p_profit_loss: profitLoss
           });
 
-          closedCount++;
-
-          results.push({
-            signal_id: signal.id,
-            symbol: signal.symbol,
-            outcome: outcome,
-            current_price: currentPrice,
-            entry_price: signal.entry_price,
-            status: 'CLOSED'
-          });
-
-          console.log(`[${signal.symbol}] Signal closed: ${outcome} at ${currentPrice} (P/L: ${profitLoss?.toFixed(5)})`);
+          if (rpcError) {
+            console.error(`[${signal.symbol}] Failed to close signal in DB:`, rpcError.message);
+            results.push({
+              signal_id: signal.id,
+              symbol: signal.symbol,
+              outcome: outcome,
+              current_price: currentPrice,
+              entry_price: signal.entry_price,
+              status: 'ERROR_CLOSE'
+            });
+          } else {
+            closedCount++;
+            results.push({
+              signal_id: signal.id,
+              symbol: signal.symbol,
+              outcome: outcome,
+              current_price: currentPrice,
+              entry_price: signal.entry_price,
+              status: 'CLOSED'
+            });
+            console.log(`[${signal.symbol}] Signal closed: ${outcome} at ${currentPrice} (P/L: ${profitLoss?.toFixed(5)})`);
+          }
         } else {
           results.push({
             signal_id: signal.id,
@@ -186,7 +194,28 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // No time-based expiry: signals stay active until SL or TP is hit only
+    // Also check for expired signals
+    const { data: expiredSignals } = await supabase
+      .from('signals')
+      .select('id, symbol')
+      .eq('is_active', true)
+      .lt('expires_at', new Date().toISOString());
+
+    if (expiredSignals && expiredSignals.length > 0) {
+      console.log(`[MONITOR] Found ${expiredSignals.length} expired signals`);
+
+      for (const expired of expiredSignals) {
+        await supabase.rpc('update_signal_outcome', {
+          p_signal_id: expired.id,
+          p_outcome: 'EXPIRED',
+          p_close_price: null,
+          p_profit_loss: null
+        });
+
+        closedCount++;
+        console.log(`[${expired.symbol}] Expired signal closed`);
+      }
+    }
 
     console.log(`[MONITOR] Completed. Monitored ${activeSignals.length} signals, closed ${closedCount}`);
 

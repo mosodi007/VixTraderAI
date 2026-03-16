@@ -448,7 +448,7 @@ export class AdvancedSignalDetector {
           entryPrice: currentPrice,
           stopLoss: 0,
           takeProfit: 0,
-          reasoning: 'No trading signal detected yet.'
+          reasoning: 'Not enough data for analysis - wait for the next round...'
         };
       }
 
@@ -518,10 +518,10 @@ export class AdvancedSignalDetector {
   ): string {
     const parts: string[] = [];
 
-    parts.push(`${direction} signal detected with ${confidence}% confidence`);
+    parts.push(`${direction} signal detected with ${confidence}% confidence.`);
 
     if (triggers.length > 0) {
-      parts.push(`\n\nTechnical Triggers (${triggers.length}):`);
+      parts.push(`\n\nTriggers (${triggers.length}/3):`);
       triggers.forEach(t => {
         parts.push(`- ${t.indicatorName}: ${t.triggerCondition}`);
       });

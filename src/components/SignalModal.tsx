@@ -137,7 +137,7 @@ export function SignalModal({ signal, onClose }: SignalModalProps) {
               <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-xl p-6">
                 <h3 className="text-lg font-bold text-black dark:text-white mb-4">Signal Metrics</h3>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-white dark:bg-slate-900/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
+                  {/* <div className="bg-white dark:bg-slate-900/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
                     <div className="flex items-center gap-2 mb-2">
                       <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                       <span className="text-xs text-slate-600 dark:text-slate-400">AI Confidence</span>
@@ -145,7 +145,7 @@ export function SignalModal({ signal, onClose }: SignalModalProps) {
                     <p className="text-2xl font-bold text-black dark:text-white">
                       {signal.confidence_percentage || signal.confidence}%
                     </p>
-                  </div>
+                  </div> */}
                   <div className="bg-white dark:bg-slate-900/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
                     <div className="flex items-center gap-2 mb-2">
                       <Target className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />

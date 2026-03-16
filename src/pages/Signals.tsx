@@ -3,9 +3,8 @@ import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity, Volume2, VolumeX, Play } from 'lucide-react';
+import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity, Play } from 'lucide-react';
 import { SignalModal } from '../components/SignalModal';
-import { playNewSignalAlert, unlockAudio, unlockAudioSilent } from '../lib/soundAlert';
 
 interface Signal {
   id: string;
@@ -22,13 +21,13 @@ interface Signal {
   confidence: number;
   confidence_percentage: number | null;
   created_at: string;
+  is_active?: boolean;
+  outcome?: string | null;
 }
 
 interface GroupedSignals {
   [key: string]: Signal[];
 }
-
-const SOUND_ALERTS_STORAGE_KEY = 'vix-signal-sound-alerts';
 
 interface AnalysisLogEntry {
   timestamp: string;
@@ -134,7 +133,7 @@ function LiveAnalysisConsoleInline() {
       const data = await response.json();
 
       if (data.success) {
-        addLog('SYSTEM', `Scan complete! Generated ${data.stats?.signals_generated ?? 0} signals`, 'success');
+        addLog('SYSTEM', `Analysis complete! Found ${data.stats?.signals_generated ?? 0} signals`, 'success');
         setResults(data);
 
         if (Array.isArray(data.results)) {
@@ -191,12 +190,12 @@ function LiveAnalysisConsoleInline() {
             <div className="bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3">
               <div className="flex items-center gap-2 mb-1">
                 <Clock className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-                <span className="text-xs text-slate-600 dark:text-slate-400">Next Scan In</span>
+                <span className="text-xs text-slate-600 dark:text-slate-400">Next Analysis In</span>
               </div>
               <p className="text-lg font-bold text-black dark:text-white">{timeUntilScan}</p>
             </div>
           )}
-          <label className="flex items-center gap-2 cursor-pointer">
+          {/* <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={autoScanEnabled}
@@ -204,8 +203,8 @@ function LiveAnalysisConsoleInline() {
               className="w-4 h-4 text-emerald-600 bg-slate-100 border-slate-300 rounded focus:ring-emerald-500 dark:focus:ring-emerald-600 dark:ring-offset-slate-800 focus:ring-2 dark:bg-slate-700 dark:border-slate-600"
             />
             <span className="text-sm text-slate-600 dark:text-slate-400">Auto-scan</span>
-          </label>
-          <button
+          </label> */}
+          {/* <button
             onClick={runAnalysis}
             disabled={isAnalyzing}
             className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white font-medium rounded-lg transition-colors shadow-lg"
@@ -221,11 +220,11 @@ function LiveAnalysisConsoleInline() {
                 Run Analysis
               </>
             )}
-          </button>
+          </button> */}
         </div>
       </div>
 
-      {results && (
+      {/* {results && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-slate-700 rounded-xl p-6">
             <div className="flex items-center gap-3 mb-2">
@@ -241,7 +240,7 @@ function LiveAnalysisConsoleInline() {
             <p className="text-3xl font-bold text-emerald-700 dark:text-emerald-300">{results.stats?.signals_generated ?? 0}</p>
           </div>
         </div>
-      )}
+      )} */}
 
       <div className="bg-slate-900 dark:bg-slate-950 border border-slate-700 rounded-xl overflow-hidden shadow-xl">
         <div className="bg-slate-800 dark:bg-slate-900 px-4 py-3 border-b border-slate-700 flex items-center gap-2">
@@ -275,43 +274,15 @@ function LiveAnalysisConsoleInline() {
   );
 }
 
-function getStoredSoundAlerts(): boolean {
-  try {
-    return localStorage.getItem(SOUND_ALERTS_STORAGE_KEY) !== 'false';
-  } catch {
-    return true;
-  }
-}
-
 export function Signals() {
   const { user } = useAuth();
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
-  const [soundAlertsOn, setSoundAlertsOn] = useState(getStoredSoundAlerts());
-  const soundAlertsOnRef = useRef(soundAlertsOn);
   const previousSignalIdsRef = useRef<Set<string>>(new Set());
   const [showLiveAnalysis, setShowLiveAnalysis] = useState(false);
 
-  soundAlertsOnRef.current = soundAlertsOn;
-
-  const handleSoundAlertsToggle = (on: boolean) => {
-    setSoundAlertsOn(on);
-    try {
-      localStorage.setItem(SOUND_ALERTS_STORAGE_KEY, String(on));
-    } catch {}
-    if (on) unlockAudio();
-  };
-
   useEffect(() => {
-    // Re-unlock audio when user returns to tab (silent – no peep). Ensures playNewSignalAlert() works when a new signal arrives.
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && soundAlertsOnRef.current) {
-        unlockAudioSilent();
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
     loadSignals();
     monitorSignalPrices();
 
@@ -325,7 +296,7 @@ export function Signals() {
         const newSignal = payload.new as Signal;
         setSignals((prev) => [newSignal, ...prev]);
 
-        // Show notification
+        // Show browser notification
         if ('Notification' in window && Notification.permission === 'granted') {
           new Notification('New Trading Signal!', {
             body: `${newSignal.direction} ${newSignal.symbol} at ${newSignal.entry_price}`,
@@ -333,12 +304,18 @@ export function Signals() {
           });
         }
 
-        // Sound alert for new signal (only if user has enabled it)
-        if (soundAlertsOnRef.current) playNewSignalAlert();
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'signals' }, (payload) => {
+        const updated = payload.new as Signal & { is_active?: boolean; outcome?: string | null };
+        const closedOutcomes = ['tp1_hit', 'tp2_hit', 'tp3_hit', 'sl_hit', 'expired'];
+        const outcomeClosed = updated?.outcome != null && closedOutcomes.includes(String(updated.outcome).toLowerCase());
+        const isClosed = updated?.is_active === false || outcomeClosed;
+        if (isClosed) {
+          setSignals((prev) => prev.filter((s) => s.id !== updated.id));
+          return;
+        }
         setSignals((prev) =>
-          prev.map(signal => signal.id === payload.new.id ? payload.new as Signal : signal)
+          prev.map((signal) => (signal.id === updated.id ? (updated as Signal) : signal))
         );
       })
       .subscribe();
@@ -354,7 +331,6 @@ export function Signals() {
     }
 
     return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
       subscription.unsubscribe();
       clearInterval(priceMonitorInterval);
       clearInterval(pollInterval);
@@ -407,9 +383,6 @@ export function Signals() {
           });
         });
       }
-      if (soundAlertsOnRef.current) {
-        playNewSignalAlert();
-      }
     }
 
     setSignals(list);
@@ -451,15 +424,17 @@ export function Signals() {
     return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
   };
 
-  const groupedSignals = groupSignalsByDate(signals);
+  // Only show signals that are still active (defensive: never show closed in Active list)
+  const activeSignalsList = signals.filter((s) => s.is_active !== false);
+  const groupedSignals = groupSignalsByDate(activeSignalsList);
 
   return (
     <ProtectedRoute>
       <DashboardLayout currentPage="signals">
         <div className="max-w-7xl mx-auto space-y-6">
           <div>
-            <h2 className="text-3xl font-bold text-black dark:text-white mb-2">Deriv Live Signals</h2>
-            <p className="text-slate-600 dark:text-slate-400">AI-powered trading signals appear here automatically</p>
+            <h2 className="text-3xl font-bold text-black dark:text-white mb-2">Trading Signals</h2>
+            <p className="text-slate-600 dark:text-slate-400">AI-powered Volatility Index trading signals will appear here</p>
           </div>
           <button
             type="button"
@@ -475,32 +450,9 @@ export function Signals() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-bold text-black dark:text-white">Active Signals</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">{signals.length} Signal{signals.length !== 1 ? 's' : ''} Available</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{activeSignalsList.length} Signal{activeSignalsList.length !== 1 ? 's' : ''} Available</p>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <span className="text-sm text-slate-600 dark:text-slate-400">Sound alert</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={soundAlertsOn}
-                      onClick={() => handleSoundAlertsToggle(!soundAlertsOn)}
-                      className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
-                        soundAlertsOn ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-600'
-                      }`}
-                    >
-                      <span className="sr-only">Toggle sound alerts</span>
-                      <span
-                        className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform ${
-                          soundAlertsOn ? 'translate-x-5' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                    {soundAlertsOn ? (
-                      <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    ) : (
-                      <VolumeX className="w-4 h-4 text-slate-400" />
-                    )}
-                  </label>
+                
               </div>
             </div>
 
@@ -508,12 +460,12 @@ export function Signals() {
               <div className="flex items-center justify-center h-64">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
               </div>
-            ) : signals.length === 0 ? (
+            ) : activeSignalsList.length === 0 ? (
               <div className="p-12 text-center">
                 <div className="w-16 h-16 bg-emerald-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Activity className="w-8 h-8 text-emerald-600 dark:text-emerald-400 animate-pulse" />
                 </div>
-                <h3 className="text-xl font-bold text-black dark:text-white mb-2">No Active Signals</h3>
+                <h3 className="text-xl font-bold text-black dark:text-white mb-2">AI is looking for trading opportunities...</h3>
                 <p className="text-slate-600 dark:text-slate-400">
                   New signals will appear here automatically when high-probability setups are detected
                 </p>

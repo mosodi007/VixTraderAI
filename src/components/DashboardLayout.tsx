@@ -1,7 +1,9 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, History, Sun, Moon, Activity } from 'lucide-react';
+import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, History, Sun, Moon, Activity, Bell, BellRing } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { playNewSignalAlert, unlockAudio } from '../lib/soundAlert';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -12,15 +14,38 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
   const { user, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notificationCount, setNotificationCount] = useState(0);
 
   const navigation = [
     { name: 'Dashboard', icon: Home, page: 'home' },
     { name: 'Live Signals', icon: TrendingUp, page: 'signals' },
-    { name: 'Live Analysis', icon: Activity, page: 'live-analysis' },
     { name: 'Past Signals', icon: History, page: 'past-signals' },
     { name: 'Performance', icon: BarChart3, page: 'performance' },
     { name: 'Settings', icon: Settings, page: 'settings' },
   ];
+
+  // Subscribe globally to new signals to drive the notification badge
+  useEffect(() => {
+    const channel = supabase
+      .channel('header-signal-notifications')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'signals' },
+        (payload) => {
+          const newSignal = payload.new as any;
+          if (newSignal && newSignal.is_active) {
+            setNotificationCount((prev) => prev + 1);
+            // Attempt to play sound when a new signal notification arrives
+            playNewSignalAlert();
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-white dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
@@ -35,7 +60,7 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
                 <TrendingUp className="w-6 h-6 text-white" />
               </div>
               <div>
-                <h1 className="text-black dark:text-white font-bold">Deriv AI</h1>
+                <h1 className="text-black dark:text-white font-bold">VixAI Trader</h1>
                 <p className="text-xs text-slate-600 dark:text-slate-400">Trading Platform</p>
               </div>
             </div>
@@ -103,7 +128,29 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
                 <Menu className="w-6 h-6" />
               </button>
               <div className="flex items-center gap-4 ml-auto">
-                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotificationCount(0);
+                    // User interaction: unlock audio for future alerts
+                    unlockAudio();
+                    window.location.hash = '#signals';
+                  }}
+                  className="relative inline-flex items-center justify-center rounded-full p-2 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors"
+                  aria-label="Notifications"
+                >
+                  {notificationCount > 0 ? (
+                    <BellRing className="w-5 h-5" />
+                  ) : (
+                    <Bell className="w-5 h-5" />
+                  )}
+                  {notificationCount > 0 && (
+                    <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white">
+                      {notificationCount > 9 ? '9+' : notificationCount}
+                    </span>
+                  )}
+                </button>
+                <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg">
                   <Wifi className="w-4 h-4 text-emerald-500" />
                   <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Connected</span>
                 </div>
