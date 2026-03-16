@@ -3,7 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createDerivAPI } from "../_shared/deriv-api.ts";
 import { createSignalDetector } from "../_shared/advanced-signal-detector.ts";
 import { refineSignalWithICT } from "../_shared/ict-signal-refiner.ts";
-import { SYMBOL_SL_TP_POINTS } from "../_shared/symbol-sl-tp.ts";
+import { SYMBOL_SL_TP_POINTS, getPointSize } from "../_shared/symbol-sl-tp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -170,17 +170,16 @@ Deno.serve(async (req: Request) => {
           };
         }
 
-        // Liquidity levels from recent price range (ICT: avoid placing SL where liquidity sits)
+        // Manipulation phase high/low (recent range before the move; used for SL placement)
         const prices = ticks.map((t: { quote: number }) => t.quote);
         const recentPrices = prices.slice(-Math.min(80, prices.length));
-        const recentSwingHigh = recentPrices.length ? Math.max(...recentPrices) : detection.entryPrice;
-        const recentSwingLow = recentPrices.length ? Math.min(...recentPrices) : detection.entryPrice;
+        const manipulation_high = recentPrices.length ? Math.max(...recentPrices) : detection.entryPrice;
+        const manipulation_low = recentPrices.length ? Math.min(...recentPrices) : detection.entryPrice;
+        const atr = detection.atr ?? Math.max(Math.abs(detection.entryPrice - detection.stopLoss) / 2, detection.entryPrice * 0.001);
 
-        // ICT refinement: OpenAI acts as expert ICT trader (best-effort; never blocks signal creation)
+        // ICT refinement: AI sets entry and SL at manipulation phase high/low
         let entryPrice = detection.entryPrice;
         let stopLoss = detection.stopLoss;
-        let takeProfit = detection.takeProfit ?? detection.tp1 ?? 0;
-        let tp1 = detection.tp1 ?? detection.takeProfit ?? 0;
         let marketContext = detection.reasoning;
         let ictResult: { refined: { entry_price: number; stop_loss: number; tp1: number }; reasoning: string } | null = null;
         try {
@@ -188,11 +187,11 @@ Deno.serve(async (req: Request) => {
             symbol,
             direction: detection.direction,
             currentPrice: detection.entryPrice,
-            atr: detection.atr ?? Math.abs(detection.entryPrice - detection.stopLoss) / 2,
+            atr,
             supportLevels: detection.supportLevels ?? [],
             resistanceLevels: detection.resistanceLevels ?? [],
-            recentSwingHigh,
-            recentSwingLow,
+            manipulation_high,
+            manipulation_low,
             initialEntry: detection.entryPrice,
             initialStopLoss: detection.stopLoss,
             initialTp1: detection.tp1 ?? detection.takeProfit ?? 0,
@@ -205,24 +204,30 @@ Deno.serve(async (req: Request) => {
         }
 
         if (ictResult) {
-          const detectorSlDistance = Math.abs(detection.entryPrice - detection.stopLoss);
-          const ictSlDistance = Math.abs(ictResult.refined.entry_price - ictResult.refined.stop_loss);
-          const ictTpDistance = Math.abs(ictResult.refined.tp1 - ictResult.refined.entry_price);
-          const useIctSl = detectorSlDistance > 0 && ictSlDistance >= detectorSlDistance * 0.5;
-          const useIctTp = detectorSlDistance > 0 && ictTpDistance >= detectorSlDistance * 0.75;
-
           entryPrice = ictResult.refined.entry_price;
-          stopLoss = useIctSl ? ictResult.refined.stop_loss : detection.stopLoss;
-          tp1 = useIctTp ? ictResult.refined.tp1 : (detection.tp1 ?? detection.takeProfit ?? 0);
-          takeProfit = tp1;
+          stopLoss = ictResult.refined.stop_loss;
           marketContext = `${detection.reasoning}\n\n[ICT Refinement] ${ictResult.reasoning}`;
-          if (!useIctSl || !useIctTp) {
-            console.log(`[${symbol}] 🎯 ICT refined but SL/TP too tight; using detector levels for ${!useIctSl ? 'SL' : ''} ${!useIctTp ? 'TP' : ''}`);
-          }
-          console.log(`[${symbol}] 🎯 ICT refined: Entry ${entryPrice}, SL ${stopLoss}, TP ${tp1}`);
+          console.log(`[${symbol}] ICT refined: Entry ${entryPrice}, SL ${stopLoss}`);
         }
 
-        // Ensure SL/TP are valid: positive and on correct side of entry (never negative or wrong side)
+        // Enforce minimum SL distance (enough room): min_sl_distance = max(1*ATR, pointSize*15)
+        const pointSize = getPointSize(symbol);
+        const minSlDistance = Math.max(atr, pointSize * 15);
+        const slDistance = Math.abs(entryPrice - stopLoss);
+        if (slDistance < minSlDistance) {
+          if (detection.direction === 'BUY') {
+            stopLoss = entryPrice - minSlDistance;
+          } else {
+            stopLoss = entryPrice + minSlDistance;
+          }
+          console.log(`[${symbol}] SL nudged to meet min distance: ${minSlDistance.toFixed(2)}`);
+        }
+
+        // Enforce 1:2 risk-to-reward: TP = entry ± 2 * risk
+        const risk = Math.abs(entryPrice - stopLoss);
+        let tp1 = detection.direction === 'BUY' ? entryPrice + 2 * risk : entryPrice - 2 * risk;
+
+        // Ensure SL/TP valid (positive, correct side of entry)
         const dir = detection.direction;
         const invalid =
           stopLoss <= 0 ||
@@ -230,97 +235,108 @@ Deno.serve(async (req: Request) => {
           (dir === 'BUY' && (stopLoss >= entryPrice || tp1 <= entryPrice)) ||
           (dir === 'SELL' && (tp1 >= entryPrice || stopLoss <= entryPrice));
         if (invalid) {
-          console.warn(`[${symbol}] Invalid SL/TP levels (e.g. negative or wrong side), using detector levels`);
+          console.warn(`[${symbol}] Invalid SL/TP after enforcement; using detector levels`);
           entryPrice = detection.entryPrice;
           stopLoss = detection.stopLoss;
-          takeProfit = detection.takeProfit ?? detection.tp1 ?? 0;
-          tp1 = detection.tp1 ?? detection.takeProfit ?? 0;
+          const riskFallback = Math.abs(entryPrice - stopLoss) || atr;
+          tp1 = detection.direction === 'BUY' ? entryPrice + 2 * riskFallback : entryPrice - 2 * riskFallback;
         }
+        const takeProfitFinal = tp1;
 
-        // Get MT5 symbol mapping
         const mt5Symbol = derivAPI.getMT5Symbol(symbol);
-        const currentPrice = entryPrice;
+        const currentPrice = prices[prices.length - 1];
 
-        // No time-based expiry: signal stays active until SL or TP is hit
+        // Entry tolerance: signal only when price reaches suggested entry (or create pending setup)
+        const entryTolerancePoints = Number(Deno.env.get('ENTRY_TOLERANCE_POINTS')) || 50;
+        const entryTolerance = entryTolerancePoints * pointSize;
+        const atEntry = Math.abs(currentPrice - entryPrice) <= entryTolerance;
+
         const expiresAt = new Date('2099-12-31T23:59:59Z');
+        const riskRewardRatio = 2;
 
-        const riskRewardRatio = Math.abs(tp1 - currentPrice) / Math.abs(currentPrice - stopLoss) || detection.riskRewardRatio;
+        if (atEntry) {
+          // Price at entry: create signal immediately
+          const { data: newSignal, error: insertError } = await supabase
+            .from('signals')
+            .insert({
+              symbol,
+              mt5_symbol: mt5Symbol,
+              direction: detection.direction,
+              entry_price: entryPrice,
+              stop_loss: stopLoss,
+              take_profit: takeProfitFinal,
+              tp1: takeProfitFinal,
+              tp2: null,
+              tp3: null,
+              pip_stop_loss: Math.abs(entryPrice - stopLoss),
+              pip_take_profit: Math.abs(takeProfitFinal - entryPrice),
+              risk_reward_ratio: riskRewardRatio,
+              timeframe: timeframe,
+              confidence: detection.confidence,
+              confidence_percentage: detection.confidence,
+              signal_type: ictResult ? 'ICT_REFINED' : 'INDICATOR_BASED',
+              signal_status: 'ACTIVE',
+              trigger_count: detection.triggers.length,
+              market_context: marketContext,
+              reasoning: marketContext,
+              technical_indicators: { triggers: detection.triggers, patterns: detection.patterns },
+              expires_at: expiresAt.toISOString(),
+              is_active: true,
+              order_type: 'MARKET',
+            })
+            .select()
+            .single();
 
-        // Create signal in database (single TP only; tp2/tp3 kept null for schema compatibility)
-        const { data: newSignal, error: insertError } = await supabase
-          .from('signals')
-          .insert({
-            symbol: symbol,
-            mt5_symbol: mt5Symbol,
-            direction: detection.direction,
-            entry_price: currentPrice,
-            stop_loss: stopLoss,
-            take_profit: takeProfit,
-            tp1,
-            tp2: null,
-            tp3: null,
-            pip_stop_loss: Math.abs(currentPrice - stopLoss),
-            pip_take_profit: Math.abs(tp1 - currentPrice),
-            risk_reward_ratio: riskRewardRatio,
-            timeframe: timeframe,
-            confidence: detection.confidence,
-            confidence_percentage: detection.confidence,
-            signal_type: ictResult ? 'ICT_REFINED' : 'INDICATOR_BASED',
-            signal_status: 'ACTIVE',
-            trigger_count: detection.triggers.length,
-            market_context: marketContext,
-            reasoning: marketContext,
-            technical_indicators: {
-              triggers: detection.triggers,
-              patterns: detection.patterns
-            },
-            expires_at: expiresAt.toISOString(),
-            is_active: true,
-            order_type: 'MARKET',
-          })
-          .select()
-          .single();
+          if (insertError) {
+            console.error(`[${symbol}] Error creating signal:`, insertError);
+            throw insertError;
+          }
 
-        if (insertError) {
-          console.error(`[${symbol}] Error creating signal:`, insertError);
-          throw insertError;
+          console.log(`[${symbol}] Signal created at entry: ${detection.direction} @ ${entryPrice} (ID: ${newSignal.id})`);
+          await supabase.rpc('register_active_signal', { p_symbol: symbol, p_mt5_symbol: mt5Symbol, p_signal_id: newSignal.id });
+
+          if (detection.triggers.length > 0) {
+            await supabase.from('signal_triggers').insert(detection.triggers.map(trigger => ({
+              signal_id: newSignal.id,
+              indicator_name: trigger.indicatorName,
+              indicator_value: trigger.indicatorValue,
+              trigger_condition: trigger.triggerCondition,
+              timeframe: trigger.timeframe
+            })));
+          }
+          generatedSignals.push(newSignal);
+          return { symbol, signalGenerated: true, reason: `${detection.direction} signal at entry (1:2 R:R)`, confidence: detection.confidence, direction: detection.direction };
         }
 
-        console.log(`[${symbol}] ✓ Signal created: ${detection.direction} at ${currentPrice} (ID: ${newSignal.id})${ictResult ? ' [ICT refined]' : ''}`);
+        // Price not at entry: store pending setup; signal created when check-pending-entry sees price at entry
+        const pendingExpiresAt = new Date();
+        pendingExpiresAt.setHours(pendingExpiresAt.getHours() + 2);
 
-        // Register in active signal registry
-        await supabase.rpc('register_active_signal', {
-          p_symbol: symbol,
-          p_mt5_symbol: mt5Symbol,
-          p_signal_id: newSignal.id
+        await supabase.from('pending_setups').delete().eq('symbol', symbol).eq('status', 'pending');
+        const { error: pendingErr } = await supabase.from('pending_setups').insert({
+          symbol,
+          direction: detection.direction,
+          suggested_entry: entryPrice,
+          stop_loss: stopLoss,
+          take_profit: takeProfitFinal,
+          manipulation_high,
+          manipulation_low,
+          atr,
+          reasoning: marketContext,
+          confidence: detection.confidence,
+          trigger_summary: detection.triggers.map((t) => t.triggerCondition).join('; '),
+          technical_indicators: { triggers: detection.triggers, patterns: detection.patterns },
+          timeframe,
+          expires_at: pendingExpiresAt.toISOString(),
+          status: 'pending',
         });
 
-        // Record signal triggers
-        if (detection.triggers.length > 0) {
-          const triggerRecords = detection.triggers.map(trigger => ({
-            signal_id: newSignal.id,
-            indicator_name: trigger.indicatorName,
-            indicator_value: trigger.indicatorValue,
-            trigger_condition: trigger.triggerCondition,
-            timeframe: trigger.timeframe
-          }));
-
-          await supabase
-            .from('signal_triggers')
-            .insert(triggerRecords);
-
-          console.log(`[${symbol}] Recorded ${detection.triggers.length} trigger conditions`);
+        if (pendingErr) {
+          console.error(`[${symbol}] Error creating pending setup:`, pendingErr);
+          throw pendingErr;
         }
-
-        generatedSignals.push(newSignal);
-
-        return {
-          symbol,
-          signalGenerated: true,
-          reason: `${detection.direction} signal generated with ${detection.confidence}% confidence`,
-          confidence: detection.confidence,
-          direction: detection.direction
-        };
+        console.log(`[${symbol}] Pending setup created: entry ${entryPrice}, SL ${stopLoss}, TP ${takeProfitFinal}; signal when price reaches entry (tolerance ${entryTolerance.toFixed(2)})`);
+        return { symbol, signalGenerated: true, reason: `Pending setup; signal when price reaches ${entryPrice.toFixed(2)}`, confidence: detection.confidence, direction: detection.direction };
 
       } catch (error: any) {
         console.error(`[${symbol}] Error:`, error.message);

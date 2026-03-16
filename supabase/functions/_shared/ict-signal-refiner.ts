@@ -12,10 +12,14 @@ export interface ICTRefinerInput {
   atr: number;
   supportLevels: number[];
   resistanceLevels: number[];
-  /** Recent swing high (liquidity above - where buy stops cluster for SELL) */
-  recentSwingHigh: number;
-  /** Recent swing low (liquidity below - where sell stops cluster for BUY) */
-  recentSwingLow: number;
+  /** Manipulation phase high (use for SELL stop loss: place SL at or just above this) */
+  manipulation_high: number;
+  /** Manipulation phase low (use for BUY stop loss: place SL at or just below this) */
+  manipulation_low: number;
+  /** @deprecated use manipulation_high */
+  recentSwingHigh?: number;
+  /** @deprecated use manipulation_low */
+  recentSwingLow?: number;
   /** Initial levels from indicator-based detector */
   initialEntry: number;
   initialStopLoss: number;
@@ -45,8 +49,8 @@ function buildPrompt(input: ICTRefinerInput): string {
     atr,
     supportLevels,
     resistanceLevels,
-    recentSwingHigh,
-    recentSwingLow,
+    manipulation_high,
+    manipulation_low,
     initialEntry,
     initialStopLoss,
     initialTp1,
@@ -55,7 +59,7 @@ function buildPrompt(input: ICTRefinerInput): string {
     triggerSummary,
   } = input;
 
-  return `You are an expert ICT (Inner Circle Trader) trader. A ${direction} setup is CONFIRMED on ${symbol}. Your job is to refine entry, stop loss, and take-profit targets to avoid liquidity sweeps and aim for 70-80% win rate.
+  return `You are an expert ICT (Inner Circle Trader) trader. A ${direction} setup is CONFIRMED on ${symbol}. Your job is to refine entry and stop loss. Place stop loss at the manipulation phase high/low so there is enough room; the system will set take profit at 1:2 risk-reward.
 
 **Current context**
 - Direction: ${direction}
@@ -63,20 +67,22 @@ function buildPrompt(input: ICTRefinerInput): string {
 - ATR: ${atr.toFixed(2)}
 - Support levels (nearest first): ${supportLevels.slice(0, 5).map(s => s.toFixed(2)).join(', ') || 'none'}
 - Resistance levels (nearest first): ${resistanceLevels.slice(0, 5).map(r => r.toFixed(2)).join(', ') || 'none'}
-- Recent swing HIGH (liquidity above / buy-side): ${recentSwingHigh.toFixed(2)}
-- Recent swing LOW (liquidity below / sell-side): ${recentSwingLow.toFixed(2)}
+- Manipulation phase HIGH (liquidity above; for SELL place SL at or just above this): ${manipulation_high.toFixed(2)}
+- Manipulation phase LOW (liquidity below; for BUY place SL at or just below this): ${manipulation_low.toFixed(2)}
 
 **Indicator engine suggested (use only as reference)**
-- Entry: ${initialEntry.toFixed(2)}, SL: ${initialStopLoss.toFixed(2)}, TP1: ${initialTp1.toFixed(2)}, TP2: ${initialTp2.toFixed(2)}, TP3: ${initialTp3.toFixed(2)}
+- Entry: ${initialEntry.toFixed(2)}, SL: ${initialStopLoss.toFixed(2)}, TP1: ${initialTp1.toFixed(2)}
 - Triggers: ${triggerSummary}
 
 **ICT rules you must follow**
-1. **Stop loss**: Place SL BEYOND liquidity so we are not swept. For BUY: SL must be below the recent swing low (ideally 1-2 ATR below ${recentSwingLow.toFixed(2)}). For SELL: SL must be above the recent swing high (ideally 1-2 ATR above ${recentSwingHigh.toFixed(2)}).
-2. **Entry**: Prefer a better entry using price action: e.g. pullback to a support (BUY) or resistance (SELL), or a fair value gap. If current price is already good for the level, use it. Entry must be between SL and first TP.
-3. **TP targets**: Place TP1/TP2/TP3 at logical structure: next resistance (BUY) or support (SELL), or equal legs. Maintain at least 2:1 risk-reward on TP1. Goal is 70-80% win rate so TP1 should be reachable; TP2/TP3 can extend.
+1. **Stop loss**: Set SL at the manipulation phase level so we are not swept and there is enough room.
+   - For BUY: SL must be at or just beyond the manipulation LOW (e.g. at ${manipulation_low.toFixed(2)} or 0.5-1 ATR below it). Do not place SL above entry.
+   - For SELL: SL must be at or just beyond the manipulation HIGH (e.g. at ${manipulation_high.toFixed(2)} or 0.5-1 ATR above it). Do not place SL below entry.
+2. **Entry**: Suggest the best entry using price action: e.g. pullback to support (BUY) or resistance (SELL), or current price if it is already at a valid level. Entry must be between SL and TP (TP will be set at 1:2 R:R by the system).
 
 Respond with ONLY a single JSON object, no markdown or extra text:
-{"entry_price": <number>, "stop_loss": <number>, "tp1": <number>, "tp2": <number>, "tp3": <number>, "entry_notes": "<short string>"}`;
+{"entry_price": <number>, "stop_loss": <number>, "tp1": <number>, "tp2": <number>, "tp3": <number>, "entry_notes": "<short string>"}
+(tp1/tp2/tp3 will be overwritten to enforce 1:2; you may set tp1 to entry + 2*risk for BUY or entry - 2*risk for SELL as a placeholder.)`;
 }
 
 function parseRefinerResponse(text: string): ICTRefinerOutput | null {

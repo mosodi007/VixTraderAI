@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createDerivAPI } from "../_shared/deriv-api.ts";
+import { getPointSize } from "../_shared/symbol-sl-tp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -83,8 +84,8 @@ Deno.serve(async (req: Request) => {
       try {
         console.log(`[${signal.symbol}] Checking signal ${signal.id} (${signal.direction})`);
 
-        // Get current market price
-        const ticks = await derivAPI.getTickHistory(signal.symbol, 1);
+        // Get current market price (fetch a few ticks and use the latest by epoch)
+        const ticks = await derivAPI.getTickHistory(signal.symbol, 5);
 
         if (!ticks || ticks.length === 0) {
           console.log(`[${signal.symbol}] Unable to fetch current price`);
@@ -99,29 +100,42 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
-        const currentPrice = ticks[ticks.length - 1].quote;
-        const tp = signal.tp1 ?? signal.take_profit;
-        console.log(`[${signal.symbol}] Current: ${currentPrice}, Entry: ${signal.entry_price}, TP: ${tp}, SL: ${signal.stop_loss}`);
+        // Use the most recent tick by epoch (Deriv may return oldest-first or newest-first)
+        const sortedTicks = [...ticks].sort((a, b) => (b.epoch ?? 0) - (a.epoch ?? 0));
+        const currentPrice = Number(sortedTicks[0].quote);
+        const entryPrice = Number(signal.entry_price);
+        const stopLoss = Number(signal.stop_loss);
+        const tp = Number(signal.tp1 ?? signal.take_profit);
+
+        const pointSize = getPointSize(signal.symbol);
+        // Require price to have passed the level by at least one point (avoids false TP hit from noise/rounding)
+        const tpBuffer = pointSize;
+
+        console.log(`[${signal.symbol}] Current: ${currentPrice}, Entry: ${entryPrice}, TP: ${tp}, SL: ${stopLoss}`);
 
         let outcome: string | null = null;
         let profitLoss: number | null = null;
 
-        // Check if TP or SL hit (single TP only)
+        // Check if TP or SL hit (single TP only). Sanity: TP must be on correct side of entry.
         if (signal.direction === 'BUY') {
-          if (currentPrice >= tp) {
+          const tpValid = tp > entryPrice;
+          const slValid = stopLoss < entryPrice;
+          if (tpValid && slValid && currentPrice >= tp + tpBuffer) {
             outcome = 'TP1_HIT';
-            profitLoss = currentPrice - signal.entry_price;
-          } else if (currentPrice <= signal.stop_loss) {
+            profitLoss = currentPrice - entryPrice;
+          } else if (slValid && currentPrice <= stopLoss) {
             outcome = 'SL_HIT';
-            profitLoss = currentPrice - signal.entry_price;
+            profitLoss = currentPrice - entryPrice;
           }
         } else if (signal.direction === 'SELL') {
-          if (currentPrice <= tp) {
+          const tpValid = tp < entryPrice;
+          const slValid = stopLoss > entryPrice;
+          if (tpValid && slValid && currentPrice <= tp - tpBuffer) {
             outcome = 'TP1_HIT';
-            profitLoss = signal.entry_price - currentPrice;
-          } else if (currentPrice >= signal.stop_loss) {
+            profitLoss = entryPrice - currentPrice;
+          } else if (slValid && currentPrice >= stopLoss) {
             outcome = 'SL_HIT';
-            profitLoss = signal.entry_price - currentPrice;
+            profitLoss = entryPrice - currentPrice;
           }
         }
 
