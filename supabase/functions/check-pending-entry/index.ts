@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createDerivAPI } from "../_shared/deriv-api.ts";
 import { getPointSize } from "../_shared/symbol-sl-tp.ts";
+import { sendSignalEmail, getSignalNotificationEmails } from "../_shared/resend.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -268,6 +269,30 @@ Deno.serve(async (req: Request) => {
           suggested_entry: suggestedEntry,
         });
         console.log(`[PENDING][${symbol}] Converted pending setup ${pending.id} to signal ${newSignal.id}`);
+
+        // Send signal notification email via Resend
+        try {
+          const emails = await getSignalNotificationEmails(supabase);
+          if (emails.length > 0) {
+            const payload = {
+              id: newSignal.id,
+              symbol,
+              mt5_symbol: mt5Symbol,
+              direction,
+              entry_price: suggestedEntry,
+              stop_loss,
+              take_profit: takeProfit,
+              tp1: takeProfit,
+              risk_reward_ratio: riskRewardRatio,
+              created_at: new Date().toISOString(),
+            };
+            const result = await sendSignalEmail({ signal: payload, to: emails });
+            if (result.error) console.warn(`[PENDING][${symbol}] Resend email failed:`, result.error);
+            else console.log(`[PENDING][${symbol}] Signal email sent to ${emails.length} recipient(s)`);
+          }
+        } catch (e) {
+          console.warn("[PENDING] Resend signal email error:", e instanceof Error ? e.message : e);
+        }
       } catch (err: any) {
         console.error(`[PENDING] Error processing pending setup ${pending.id}:`, err.message || err);
         results.push({

@@ -112,6 +112,25 @@ curl -X POST https://YOUR_PROJECT_REF.supabase.co/functions/v1/auto-generate-sig
 curl -X POST https://YOUR_PROJECT_REF.supabase.co/functions/v1/monitor-signal-outcomes
 ```
 
+### Step 2.5: Signal Email Notifications (Resend) [Optional]
+
+When new signals are created (by **auto-generate-signals** or **check-pending-entry**), the app can email them to users with verified MT5 accounts using [Resend](https://resend.com).
+
+1. **Get a Resend API key**
+   - Sign up at [resend.com](https://resend.com)
+   - Create an API key in the dashboard
+
+2. **Add Edge Function secrets** (Supabase Dashboard → Edge Functions → Secrets, or CLI):
+   - `RESEND_API_KEY` – your Resend API key (required to send)
+   - `RESEND_FROM` – sender address, e.g. `VixTraderAI <signals@yourdomain.com>` (optional; defaults to Resend’s test sender if unset)
+
+3. **Verify your domain** in Resend if you use a custom `RESEND_FROM` (e.g. `signals@yourdomain.com`).
+
+4. **Who receives emails**  
+   All users who have at least one **verified** MT5 account get signal emails (email comes from the `profiles` table).
+
+If `RESEND_API_KEY` is not set, signal generation still runs; emails are simply skipped and a warning is logged.
+
 ### Step 3: Monitor Logs
 
 Check the edge function logs in your Supabase dashboard:

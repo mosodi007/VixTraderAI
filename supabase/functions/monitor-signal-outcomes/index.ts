@@ -140,36 +140,26 @@ Deno.serve(async (req: Request) => {
         if (outcome) {
           console.log(`[${signal.symbol}] ✓ Outcome detected: ${outcome} (P/L: ${profitLoss})`);
 
-          // Close signal with outcome using DB function (must succeed for signal to leave Active list)
-          const { error: rpcError } = await supabase.rpc('update_signal_outcome', {
+          // Close signal with outcome using new function
+          await supabase.rpc('update_signal_outcome', {
             p_signal_id: signal.id,
             p_outcome: outcome,
             p_close_price: currentPrice,
             p_profit_loss: profitLoss
           });
 
-          if (rpcError) {
-            console.error(`[${signal.symbol}] Failed to close signal in DB:`, rpcError.message);
-            results.push({
-              signal_id: signal.id,
-              symbol: signal.symbol,
-              outcome: outcome,
-              current_price: currentPrice,
-              entry_price: signal.entry_price,
-              status: 'ERROR_CLOSE'
-            });
-          } else {
-            closedCount++;
-            results.push({
-              signal_id: signal.id,
-              symbol: signal.symbol,
-              outcome: outcome,
-              current_price: currentPrice,
-              entry_price: signal.entry_price,
-              status: 'CLOSED'
-            });
-            console.log(`[${signal.symbol}] Signal closed: ${outcome} at ${currentPrice} (P/L: ${profitLoss?.toFixed(5)})`);
-          }
+          closedCount++;
+
+          results.push({
+            signal_id: signal.id,
+            symbol: signal.symbol,
+            outcome: outcome,
+            current_price: currentPrice,
+            entry_price: signal.entry_price,
+            status: 'CLOSED'
+          });
+
+          console.log(`[${signal.symbol}] Signal closed: ${outcome} at ${currentPrice} (P/L: ${profitLoss?.toFixed(5)})`);
         } else {
           results.push({
             signal_id: signal.id,

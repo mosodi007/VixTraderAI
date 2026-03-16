@@ -4,6 +4,7 @@ import { createDerivAPI } from "../_shared/deriv-api.ts";
 import { createSignalDetector } from "../_shared/advanced-signal-detector.ts";
 import { refineSignalWithICT } from "../_shared/ict-signal-refiner.ts";
 import { SYMBOL_SL_TP_POINTS, getPointSize } from "../_shared/symbol-sl-tp.ts";
+import { sendSignalEmail, getSignalNotificationEmails } from "../_shared/resend.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -340,11 +341,12 @@ Deno.serve(async (req: Request) => {
         return { symbol, signalGenerated: true, reason: `Pending setup; signal when price reaches ${entryPrice.toFixed(2)}`, confidence: detection.confidence, direction: detection.direction };
 
       } catch (error: any) {
-        console.error(`[${symbol}] Error:`, error.message);
+        const errMsg = error instanceof Error ? error.message : (typeof error === "string" ? error : String(error ?? "Unknown error"));
+        console.error(`[${symbol}] Error:`, errMsg);
         return {
           symbol,
           signalGenerated: false,
-          reason: `Error: ${error.message}`
+          reason: `Error: ${errMsg}`
         };
       }
     });
@@ -357,6 +359,25 @@ Deno.serve(async (req: Request) => {
     const totalScanned = symbols.length;
 
     console.log(`[AUTO-SCAN] Completed. Generated ${successCount}/${totalScanned} signals`);
+
+    // Send signal notification emails via Resend (to users with verified MT5)
+    if (generatedSignals.length > 0) {
+      try {
+        const emails = await getSignalNotificationEmails(supabase);
+        if (emails.length > 0) {
+          const sendResults = await Promise.allSettled(
+            generatedSignals.map((s: { id: string; symbol: string; mt5_symbol?: string | null; direction: string; entry_price: number; stop_loss: number; take_profit: number; tp1?: number | null; risk_reward_ratio?: number; created_at?: string }) =>
+              sendSignalEmail({ signal: s, to: emails })
+            )
+          );
+          const failed = sendResults.filter((r) => r.status === "rejected" || (r.status === "fulfilled" && (r.value as { error?: string }).error));
+          if (failed.length > 0) console.warn(`[AUTO-SCAN] ${failed.length} signal email(s) failed to send`);
+          else console.log(`[AUTO-SCAN] Sent signal emails to ${emails.length} recipient(s) for ${generatedSignals.length} signal(s)`);
+        }
+      } catch (e) {
+        console.warn("[AUTO-SCAN] Resend signal emails error:", e instanceof Error ? e.message : e);
+      }
+    }
 
     // Update scan schedule with next scan time
     // Get current scan interval from database
@@ -402,11 +423,12 @@ Deno.serve(async (req: Request) => {
       }
     );
   } catch (error: any) {
-    console.error("[AUTO-SCAN] Fatal error:", error);
+    const errMsg = error instanceof Error ? error.message : (typeof error === "string" ? error : String(error ?? "Unknown error"));
+    console.error("[AUTO-SCAN] Fatal error:", errMsg);
     return new Response(
       JSON.stringify({
         success: false,
-        error: error.message || "Automated signal generation failed",
+        error: errMsg || "Automated signal generation failed",
         timestamp: new Date().toISOString()
       }),
       {
