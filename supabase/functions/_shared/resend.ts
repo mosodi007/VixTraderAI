@@ -59,7 +59,7 @@ function buildSignalHtml(signal: SignalEmailPayload): string {
     <tr><td style="padding: 12px 16px; font-weight: 600;">Take profit</td><td style="padding: 12px 16px;">${Number(tp).toFixed(5)}</td></tr>
     ${rr ? `<tr style="background: #fff;"><td style="padding: 12px 16px; font-weight: 600;">Risk:Reward</td><td style="padding: 12px 16px;">1:${rr}</td></tr>` : ""}
   </table>
-  <p style="margin-top: 20px; font-size: 12px; color: #94a3b8;">VixTraderAI – Check the app for full details and to manage the signal.</p>
+  <p style="margin-top: 20px; font-size: 12px; color: #94a3b8;">VixAI – Check the app for full details and to manage the signal.</p>
 </body>
 </html>
 `.trim();
@@ -80,14 +80,14 @@ function escapeHtml(s: string): string {
 export async function sendSignalEmail(options: SendSignalEmailOptions): Promise<{ id?: string; error?: string }> {
   const { signal, to } = options;
   const apiKey = options.apiKey ?? Deno.env.get("RESEND_API_KEY");
-  const from = options.from ?? Deno.env.get("RESEND_FROM") ?? "VixTraderAI <signals@vixai.trade>";
+  const from = options.from ?? Deno.env.get("RESEND_FROM") ?? "VixAI - Signals <signals@vixai.trade>";
 
   if (!apiKey || to.length === 0) {
     if (!apiKey) console.warn("[Resend] RESEND_API_KEY not set; skipping email.");
     return {};
   }
 
-  const subject = `[Signal] ${signal.direction} ${signal.mt5_symbol || signal.symbol} @ ${Number(signal.entry_price).toFixed(2)}`;
+  const subject = `${signal.direction} ${signal.mt5_symbol || signal.symbol} @ ${Number(signal.entry_price).toFixed(2)}`;
   const html = buildSignalHtml(signal);
 
   const res = await fetch(RESEND_API, {

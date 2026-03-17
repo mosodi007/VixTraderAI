@@ -22,11 +22,38 @@ const DERIV_TO_MT5_SYMBOL: Record<string, string> = {
   "JD25": "Jump 25 Index",
 };
 
+type LotMode = "fixed" | "percent_balance";
+type SymbolSettings = {
+  trade_enabled: boolean;
+  lot_mode: LotMode;
+  fixed_lot: number;
+  percent: number;
+};
+
+// Default minimum lots (Deriv MT5) for convenience; EA also clamps to broker min/max/step at execution time.
+const SYMBOL_MIN_LOT: Record<string, number> = {
+  "1HZ10V": 0.5,
+  "1HZ30V": 0.2,
+  "1HZ75V": 0.05,
+  "1HZ100V": 1,
+};
+
+const SYMBOL_MAX_LOT: Record<string, number> = {
+  "1HZ10V": 400,
+  "1HZ30V": 120,
+  "1HZ75V": 80,
+  "1HZ100V": 330,
+};
+
 function getBearerToken(req: Request): string | null {
   const auth = req.headers.get("authorization") || req.headers.get("Authorization");
   if (!auth) return null;
   const m = auth.match(/^Bearer\s+(.+)$/i);
   return m ? m[1].trim() : null;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 Deno.serve(async (req: Request) => {
@@ -170,6 +197,27 @@ Deno.serve(async (req: Request) => {
     if (sigErr) throw sigErr;
     const sigList = signals || [];
 
+    // Load per-symbol settings for this mt5_login. Keyed by Deriv symbol code (e.g., "R_50").
+    const { data: symbolRows, error: symErr } = await supabase
+      .from("mt5_symbol_settings")
+      .select("symbol, trade_enabled, lot_mode, fixed_lot, percent")
+      .eq("user_id", acct.user_id)
+      .eq("mt5_login", mt5_loginStored);
+    if (symErr) {
+      console.warn("[mt5-get-instructions] mt5_symbol_settings load failed:", symErr.message);
+    }
+    const symbolSettings = new Map<string, SymbolSettings>();
+    for (const r of symbolRows || []) {
+      const symbol = String((r as any).symbol || "").trim();
+      if (!symbol) continue;
+      symbolSettings.set(symbol, {
+        trade_enabled: (r as any).trade_enabled !== false,
+        lot_mode: ((r as any).lot_mode === "percent_balance" ? "percent_balance" : "fixed") as LotMode,
+        fixed_lot: Math.max(0, Number((r as any).fixed_lot) || 0.01),
+        percent: Math.max(0, Math.min(100, Number((r as any).percent) || 0)),
+      });
+    }
+
     // Get already-executed signal_ids for this account (use request mt5_login so it matches what EA sends when reporting)
     const { data: executedTrades, error: trErr } = await supabase
       .from("trades")
@@ -187,16 +235,31 @@ Deno.serve(async (req: Request) => {
       const id = String(s.id);
       if (executed.has(id)) continue;
       if (!s.symbol || !s.direction) continue;
+
+      const symbolCode = String(s.symbol || "").trim();
+      const settings = symbolSettings.get(symbolCode);
+      if (settings && settings.trade_enabled === false) {
+        continue;
+      }
+
       const tp = s.tp1 ?? s.take_profit;
       const sl = Number(s.stop_loss);
       const tpVal = Number(tp);
       if (!Number.isFinite(sl) || !Number.isFinite(tpVal) || sl <= 0 || tpVal <= 0) continue;
       // EA needs the symbol as shown in MT5 Market Watch (e.g. "Volatility 30 (1s) Index"), not Deriv code "1HZ30V"
-      const rawSymbol = String(s.symbol || "").trim();
+      const rawSymbol = symbolCode;
       const symbolForEA =
         (s.mt5_symbol && String(s.mt5_symbol).trim()) ||
         DERIV_TO_MT5_SYMBOL[rawSymbol] ||
         rawSymbol;
+
+      const lot_mode: LotMode = settings?.lot_mode || "fixed";
+      const minLot = SYMBOL_MIN_LOT[rawSymbol] ?? 0;
+      const maxLot = SYMBOL_MAX_LOT[rawSymbol] ?? Number.POSITIVE_INFINITY;
+      const fixedCandidate = settings?.fixed_lot ?? SYMBOL_MIN_LOT[rawSymbol] ?? 0.01;
+      const fixed_lot = round2(Math.min(maxLot, Math.max(minLot, fixedCandidate)));
+      const percent = round2(settings?.percent ?? 0);
+      const lotSizeForDispatch = lot_mode === "fixed" ? fixed_lot : 0;
 
       // Dispatch lock: record that this signal was sent to this mt5_login.
       // This prevents duplicate instructions if the EA polls again before it reports trade open,
@@ -213,7 +276,7 @@ Deno.serve(async (req: Request) => {
           entry_price: Number(s.entry_price) || 0,
           stop_loss: sl,
           take_profit: tpVal,
-          lot_size: 0.01,
+          lot_size: lotSizeForDispatch,
           profit_loss: 0,
           status: "sent",
           opened_at: nowIso,
@@ -234,11 +297,16 @@ Deno.serve(async (req: Request) => {
       instructions.push({
         signal_id: id,
         symbol: symbolForEA,
+        symbol_code: rawSymbol,
         direction: s.direction,
         entry_type: "market",
         entry_price: Number(s.entry_price) || 0,
         stop_loss: sl,
         take_profit: tpVal,
+        lot_mode,
+        fixed_lot,
+        percent,
+        percent_formula: "lots_per_1000",
         magic: 123456,
         comment: `VIX_AI:${id}`,
       });

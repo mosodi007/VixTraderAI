@@ -7,18 +7,21 @@ import { Signals } from './pages/Signals';
 import { PastSignals } from './pages/PastSignals';
 import { Performance } from './pages/Performance';
 import { Settings } from './pages/Settings';
-import { CreateMT5 } from './pages/CreateMT5';
 import { Debug } from './pages/Debug';
 import { LiveAnalysis } from './pages/LiveAnalysis';
 
 function AppRoutes() {
   const { user, loading } = useAuth();
-  const [currentPage, setCurrentPage] = useState<'home' | 'signals' | 'past-signals' | 'performance' | 'settings' | 'create-mt5' | 'debug' | 'live-analysis'>('home');
+  const [currentPage, setCurrentPage] = useState<'home' | 'signals' | 'past-signals' | 'performance' | 'settings' | 'debug' | 'live-analysis'>('home');
 
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.slice(1);
-      if (hash === 'signals' || hash === 'past-signals' || hash === 'performance' || hash === 'settings' || hash === 'home' || hash === 'create-mt5' || hash === 'debug' || hash === 'live-analysis') {
+      let hash = window.location.hash.slice(1);
+      if (hash === 'create-mt5') {
+        window.location.hash = 'settings';
+        hash = 'settings';
+      }
+      if (hash === 'signals' || hash === 'past-signals' || hash === 'performance' || hash === 'settings' || hash === 'home' || hash === 'debug' || hash === 'live-analysis') {
         setCurrentPage(hash);
       }
     };
@@ -52,8 +55,6 @@ function AppRoutes() {
       return <Performance />;
     case 'settings':
       return <Settings />;
-    case 'create-mt5':
-      return <CreateMT5 />;
     case 'debug':
       return <Debug />;
     case 'live-analysis':

@@ -40,6 +40,10 @@ export interface SignalDetectionResult {
     trendEma: 'bullish' | 'bearish' | 'neutral';
     trendStructure: 'bullish' | 'bearish' | 'neutral';
     trendStrength: number;
+    /** Path length / |net move| on recent closes; high ≈ zig-zag, low ≈ trend */
+    chopRatio: number;
+    closeReversals: number;
+    swingMarketOk: boolean;
     allowed: boolean;
     blockedReasons: string[];
   };
@@ -52,6 +56,7 @@ export interface SignalDetectorConfig {
   atrSlMultiplier?: number;
   atrTpMultiplier?: number;
   /** Realized-vol percentile threshold for allowing signals */
+  /** Vol percentile above this = "high"; band below down to (this - 0.25) = "medium" (also tradable). */
   highVolPercentile?: number;
   /** Trend strength threshold above which fading the EMA trend is blocked */
   strongTrendStrength?: number;
@@ -59,13 +64,23 @@ export interface SignalDetectorConfig {
   requireTrendAlignment?: boolean;
   /** Require structure direction alignment with signal direction */
   requireStructureAlignment?: boolean;
+  /** Only allow signals when market is swinging (chop), not efficient trend */
+  requireSwingMarket?: boolean;
+  /** Min path/net on recent candle closes (default ~1.75) */
+  minChopRatio?: number;
+  /** Min close-to-close direction flips in lookback */
+  minSwingReversals?: number;
+  /** Number of 1m candles for swing metrics */
+  swingLookbackCandles?: number;
 }
 
 export class AdvancedSignalDetector {
   private analyzer: TechnicalAnalyzer;
+  // Tuned for low symbol count (1HZ30V/1HZ75V): be less strict on signal *frequency*,
+  // while keeping the trend/structure + strong-trend guards to avoid fighting trend.
   private minTriggers: number = 3;
   private minConfidence: number = 55;
-  private minRiskReward: number = 1.2;
+  private minRiskReward: number = 1.5;
   private atrSlMultiplier: number;
   private atrTpMultiplier: number;
   private slPoints: number | null = null;
@@ -74,15 +89,23 @@ export class AdvancedSignalDetector {
   private strongTrendStrength: number;
   private requireTrendAlignment: boolean;
   private requireStructureAlignment: boolean;
+  private requireSwingMarket: boolean;
+  private minChopRatio: number;
+  private minSwingReversals: number;
+  private swingLookbackCandles: number;
 
   constructor(ticks: TickData[], config?: SignalDetectorConfig) {
     this.analyzer = new TechnicalAnalyzer(ticks);
     this.atrSlMultiplier = config?.atrSlMultiplier ?? 2.5;
     this.atrTpMultiplier = config?.atrTpMultiplier ?? 4.5;
-    this.highVolPercentile = config?.highVolPercentile ?? 0.7;
+    this.highVolPercentile = config?.highVolPercentile ?? 0.55;
     this.strongTrendStrength = config?.strongTrendStrength ?? 1.2;
     this.requireTrendAlignment = config?.requireTrendAlignment ?? true;
     this.requireStructureAlignment = config?.requireStructureAlignment ?? true;
+    this.requireSwingMarket = config?.requireSwingMarket ?? true;
+    this.minChopRatio = config?.minChopRatio ?? 1.75;
+    this.minSwingReversals = config?.minSwingReversals ?? 7;
+    this.swingLookbackCandles = Math.max(15, Math.min(120, config?.swingLookbackCandles ?? 40));
     if (config?.slPoints != null && config?.tpPoints != null && config.slPoints > 0 && config.tpPoints > 0) {
       this.slPoints = config.slPoints;
       this.tpPoints = config.tpPoints;
@@ -420,12 +443,63 @@ export class AdvancedSignalDetector {
     };
   }
 
+  /**
+   * Zig-zag / swing regime: high path-to-net ratio + many close reversals.
+   * Uses 5s bars from ticks so a typical tick-history window yields enough samples.
+   */
+  private computeSwingMarketMetricsFromTicks(ticks: TickData[]): {
+    chopRatio: number;
+    closeReversals: number;
+    swingMarketOk: boolean;
+  } {
+    const candles = this.ticksToCandles(ticks, 5);
+    const recent = candles.slice(-this.swingLookbackCandles);
+    const minBars = 18;
+    if (recent.length < minBars) {
+      return {
+        chopRatio: 0,
+        closeReversals: 0,
+        swingMarketOk: !this.requireSwingMarket,
+      };
+    }
+    const closes = recent.map((c) => c.close);
+    const last = closes[closes.length - 1];
+    const eps = Math.max(Math.abs(last) * 1e-9, 1e-12);
+
+    let path = 0;
+    for (let i = 1; i < closes.length; i++) {
+      path += Math.abs(closes[i] - closes[i - 1]);
+    }
+    const net = Math.abs(closes[closes.length - 1] - closes[0]);
+    const chopRatio = net < eps ? 50 : path / net;
+
+    let closeReversals = 0;
+    for (let i = 2; i < closes.length; i++) {
+      const d0 = closes[i - 1] - closes[i - 2];
+      const d1 = closes[i] - closes[i - 1];
+      if (Math.abs(d0) < eps || Math.abs(d1) < eps) continue;
+      if (Math.sign(d0) !== Math.sign(d1)) closeReversals++;
+    }
+
+    const swingMarketOk =
+      !this.requireSwingMarket ||
+      (chopRatio >= this.minChopRatio && closeReversals >= this.minSwingReversals);
+
+    return {
+      chopRatio: parseFloat(chopRatio.toFixed(3)),
+      closeReversals,
+      swingMarketOk,
+    };
+  }
+
   detectSignal(symbol: string, timeframe: string = 'M1'): SignalDetectionResult {
     try {
       const indicators = this.analyzer.calculateIndicators();
       const ticks = (this.analyzer as any).ticks as TickData[];
       const prices = ticks.map(t => t.quote);
       const currentPrice = prices[prices.length - 1];
+
+      const swing = this.computeSwingMarketMetricsFromTicks(ticks);
 
       const candles = this.ticksToCandles(ticks, 60);
       const patterns = this.detectCandlePatterns(candles);
@@ -483,6 +557,9 @@ export class AdvancedSignalDetector {
             trendEma: indicators.trend_ema ?? 'neutral',
             trendStructure: indicators.trend_structure ?? 'neutral',
             trendStrength: indicators.trend_strength ?? 0,
+            chopRatio: swing.chopRatio,
+            closeReversals: swing.closeReversals,
+            swingMarketOk: swing.swingMarketOk,
             allowed: false,
             blockedReasons: ['no_direction'],
           },
@@ -508,21 +585,34 @@ export class AdvancedSignalDetector {
       const blockedReasons: string[] = [];
       const rvPct = indicators.realized_vol_percentile ?? 0.5;
       const volatilityRegime: 'high' | 'medium' | 'low' = rvPct >= this.highVolPercentile ? 'high' : rvPct >= Math.max(0.1, this.highVolPercentile - 0.25) ? 'medium' : 'low';
-      if (volatilityRegime !== 'high') blockedReasons.push('low_activity');
+      // Tradable when high or medium; only block the calmest bucket (low).
+      if (volatilityRegime === 'low') blockedReasons.push('low_activity');
 
       const emaTrend = indicators.trend_ema ?? 'neutral';
       const structTrend = indicators.trend_structure ?? 'neutral';
       const emaAligned = (direction === 'BUY' && emaTrend === 'bullish') || (direction === 'SELL' && emaTrend === 'bearish');
       const structAligned = (direction === 'BUY' && structTrend === 'bullish') || (direction === 'SELL' && structTrend === 'bearish');
-      if (this.requireTrendAlignment && !emaAligned) blockedReasons.push('counter_trend_ema');
+      const strength = indicators.trend_strength ?? 0;
+      const strongTrend = strength >= this.strongTrendStrength;
+
+      // Reduce counter-trend strictness:
+      // Only enforce EMA alignment when the trend is strong; in chop/transition, allow signals through.
+      if (this.requireTrendAlignment && strongTrend && !emaAligned) blockedReasons.push('counter_trend_ema');
       if (this.requireStructureAlignment && !structAligned) blockedReasons.push('counter_trend_structure');
 
       // Strong-trend guard: if strength is high, forbid fading EMA direction
-      const strength = indicators.trend_strength ?? 0;
-      const strongTrend = strength >= this.strongTrendStrength;
       if (strongTrend) {
         if (direction === 'BUY' && emaTrend === 'bearish') blockedReasons.push('strong_trend_fade');
         if (direction === 'SELL' && emaTrend === 'bullish') blockedReasons.push('strong_trend_fade');
+      }
+
+      if (this.requireSwingMarket && !swing.swingMarketOk) {
+        if (swing.chopRatio < this.minChopRatio) {
+          blockedReasons.push('trend_too_efficient');
+        }
+        if (swing.closeReversals < this.minSwingReversals) {
+          blockedReasons.push('insufficient_zigzag');
+        }
       }
 
       // Check quality thresholds + filters
@@ -535,8 +625,8 @@ export class AdvancedSignalDetector {
       // Generate reasoning
       const reasoningCore = this.generateReasoning(direction, triggers, patterns, indicators, confidence, slTp.rr);
       const reasoning = blockedReasons.length > 0
-        ? `${reasoningCore}\n\n[Filters] Blocked: ${blockedReasons.join(', ')} (rv_pct=${rvPct.toFixed(2)}, ema=${emaTrend}, structure=${structTrend}, strength=${strength.toFixed(2)})`
-        : `${reasoningCore}\n\n[Filters] Allowed (rv_pct=${rvPct.toFixed(2)}, ema=${emaTrend}, structure=${structTrend}, strength=${strength.toFixed(2)})`;
+        ? `${reasoningCore}\n\n[Filters] Trade Blocked: ${blockedReasons.join(', ')} (rv_pct=${rvPct.toFixed(2)}, ema=${emaTrend}, structure=${structTrend}, strength=${strength.toFixed(2)}, chop=${swing.chopRatio}, rev=${swing.closeReversals})`
+        : `${reasoningCore}\n\n[Filters] Allowed (rv_pct=${rvPct.toFixed(2)}, ema=${emaTrend}, structure=${structTrend}, strength=${strength.toFixed(2)}, chop=${swing.chopRatio}, rev=${swing.closeReversals}, swing_ok)`;
 
       return {
         shouldGenerateSignal,
@@ -560,6 +650,9 @@ export class AdvancedSignalDetector {
           trendEma: emaTrend,
           trendStructure: structTrend,
           trendStrength: strength,
+          chopRatio: swing.chopRatio,
+          closeReversals: swing.closeReversals,
+          swingMarketOk: swing.swingMarketOk,
           allowed: shouldGenerateSignal,
           blockedReasons,
         },
@@ -593,7 +686,7 @@ export class AdvancedSignalDetector {
     parts.push(`${direction} signal detected with ${confidence}% confidence.`);
 
     if (triggers.length > 0) {
-      parts.push(`\n\nTriggers (${triggers.length}/3):`);
+      parts.push(`\n\nTriggers (${triggers.length}):`);
       triggers.forEach(t => {
         parts.push(`- ${t.indicatorName}: ${t.triggerCondition}`);
       });
@@ -619,3 +712,4 @@ export class AdvancedSignalDetector {
 export function createSignalDetector(ticks: TickData[], config?: SignalDetectorConfig): AdvancedSignalDetector {
   return new AdvancedSignalDetector(ticks, config);
 }
+

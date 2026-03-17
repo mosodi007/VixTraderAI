@@ -12,9 +12,9 @@ export interface ICTRefinerInput {
   atr: number;
   supportLevels: number[];
   resistanceLevels: number[];
-  /** Manipulation phase high (use for SELL stop loss: place SL at or just above this) */
+  /** Recent-range high — liquidity above; price often sweeps here before dropping (SELL SL must be ABOVE this, not on it) */
   manipulation_high: number;
-  /** Manipulation phase low (use for BUY stop loss: place SL at or just below this) */
+  /** Recent-range low — liquidity below; price often sweeps here before rallying (BUY SL must be BELOW this, not on it) */
   manipulation_low: number;
   /** @deprecated use manipulation_high */
   recentSwingHigh?: number;
@@ -59,30 +59,26 @@ function buildPrompt(input: ICTRefinerInput): string {
     triggerSummary,
   } = input;
 
-  return `You are an expert ICT (Inner Circle Trader) trader. A ${direction} setup is CONFIRMED on ${symbol}. Your job is to refine entry and stop loss. Place stop loss at the manipulation phase high/low so there is enough room; the system will set take profit at 1:2 risk-reward.
+  return `You are an expert ICT (Inner Circle Trader) trader. A ${direction} setup is CONFIRMED on ${symbol}. Refine entry and stop loss. Take profit will be set from risk by the system.
 
-**Current context**
-- Direction: ${direction}
-- Current price: ${currentPrice.toFixed(2)}
-- ATR: ${atr.toFixed(2)}
-- Support levels (nearest first): ${supportLevels.slice(0, 5).map(s => s.toFixed(2)).join(', ') || 'none'}
-- Resistance levels (nearest first): ${resistanceLevels.slice(0, 5).map(r => r.toFixed(2)).join(', ') || 'none'}
-- Manipulation phase HIGH (liquidity above; for SELL place SL at or just above this): ${manipulation_high.toFixed(2)}
-- Manipulation phase LOW (liquidity below; for BUY place SL at or just below this): ${manipulation_low.toFixed(2)}
+**Critical — stops vs liquidity sweeps**
+Recent-range HIGH ${manipulation_high.toFixed(2)} and LOW ${manipulation_low.toFixed(2)} mark where stops cluster. Price often **wicks through** those levels first, then moves in your direction. SL placed on or just inside those levels gets hunted. Place SL **past** the sweep (structural invalidation), not on the pool.
 
-**Indicator engine suggested (use only as reference)**
-- Entry: ${initialEntry.toFixed(2)}, SL: ${initialStopLoss.toFixed(2)}, TP1: ${initialTp1.toFixed(2)}
-- Triggers: ${triggerSummary}
+**Context**
+- Direction: ${direction}, price: ${currentPrice.toFixed(2)}, ATR: ${atr.toFixed(2)}
+- Support: ${supportLevels.slice(0, 5).map(s => s.toFixed(2)).join(', ') || 'none'}
+- Resistance: ${resistanceLevels.slice(0, 5).map(r => r.toFixed(2)).join(', ') || 'none'}
 
-**ICT rules you must follow**
-1. **Stop loss**: Set SL at the manipulation phase level so we are not swept and there is enough room.
-   - For BUY: SL must be at or just beyond the manipulation LOW (e.g. at ${manipulation_low.toFixed(2)} or 0.5-1 ATR below it). Do not place SL above entry.
-   - For SELL: SL must be at or just beyond the manipulation HIGH (e.g. at ${manipulation_high.toFixed(2)} or 0.5-1 ATR above it). Do not place SL below entry.
-2. **Entry**: Suggest the best entry using price action: e.g. pullback to support (BUY) or resistance (SELL), or current price if it is already at a valid level. Entry must be between SL and TP (TP will be set at 1:2 R:R by the system).
+**Detector reference**: Entry ${initialEntry.toFixed(2)}, SL ${initialStopLoss.toFixed(2)}, TP ${initialTp1.toFixed(2)} | ${triggerSummary}
 
-Respond with ONLY a single JSON object, no markdown or extra text:
+**Rules**
+1. **BUY**: stop_loss must be **below** ${manipulation_low.toFixed(2)} by at least **1.0–2.0× ATR** (never at/above that low).
+2. **SELL**: stop_loss must be **above** ${manipulation_high.toFixed(2)} by at least **1.0–2.0× ATR** (never at/below that high).
+3. Sensible entry between SL and profit side.
+
+Respond with ONLY JSON:
 {"entry_price": <number>, "stop_loss": <number>, "tp1": <number>, "tp2": <number>, "tp3": <number>, "entry_notes": "<short string>"}
-(tp1/tp2/tp3 will be overwritten to enforce 1:2; you may set tp1 to entry + 2*risk for BUY or entry - 2*risk for SELL as a placeholder.)`;
+(tp placeholders OK; TPs may be overwritten.)`;
 }
 
 function parseRefinerResponse(text: string): ICTRefinerOutput | null {

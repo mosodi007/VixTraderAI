@@ -27,7 +27,7 @@ Deno.serve(async (req: Request) => {
       .eq("id", "global")
       .maybeSingle();
 
-    const curHighVol = Number(cfg?.high_vol_percentile ?? 0.7);
+    const curHighVol = Number(cfg?.high_vol_percentile ?? 0.55);
     const curStrong = Number(cfg?.strong_trend_strength ?? 1.2);
 
     // Look at recent closed signals
@@ -79,7 +79,7 @@ Deno.serve(async (req: Request) => {
     let nextHighVol = curHighVol;
     if (slRate > 0.6) nextHighVol += 0.02;
     else if (slRate < 0.45) nextHighVol -= 0.01;
-    nextHighVol = clamp(nextHighVol, 0.55, 0.90);
+    nextHighVol = clamp(nextHighVol, 0.45, 0.90);
 
     let nextStrong = curStrong;
     if (counterTrendN >= 10 && counterSLRate > 0.65) nextStrong += 0.05;

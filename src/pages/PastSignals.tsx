@@ -3,7 +3,7 @@ import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { TrendingUp, TrendingDown, Target, XCircle, Clock, BarChart3, Award } from 'lucide-react';
+import { Target, XCircle, Clock, BarChart3, Award } from 'lucide-react';
 
 interface PastSignal {
   id: string;
@@ -79,28 +79,28 @@ export function PastSignals() {
       case 'tp2_hit':
       case 'tp3_hit':
         return (
-          <span className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-600/20 text-emerald-400 rounded-full text-xs font-semibold">
+          <span className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-600/15 text-emerald-700 dark:text-emerald-400 dark:bg-emerald-500/20 rounded-full text-xs font-semibold">
             <Target className="w-3 h-3" />
             TP Hit
           </span>
         );
       case 'sl_hit':
         return (
-          <span className="inline-flex items-center gap-1 px-3 py-1 bg-red-600/20 text-red-400 rounded-full text-xs font-semibold">
+          <span className="inline-flex items-center gap-1 px-3 py-1 bg-red-600/15 text-red-700 dark:text-red-400 dark:bg-red-500/20 rounded-full text-xs font-semibold">
             <XCircle className="w-3 h-3" />
             SL Hit
           </span>
         );
       case 'expired':
         return (
-          <span className="inline-flex items-center gap-1 px-3 py-1 bg-slate-600/20 text-slate-600 dark:text-slate-400 rounded-full text-xs font-semibold">
+          <span className="inline-flex items-center gap-1 px-3 py-1 bg-slate-500/15 text-slate-700 dark:text-slate-300 dark:bg-slate-500/20 rounded-full text-xs font-semibold">
             <Clock className="w-3 h-3" />
             Expired
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center px-3 py-1 bg-slate-600/20 text-slate-600 dark:text-slate-400 rounded-full text-xs font-semibold">
+          <span className="inline-flex items-center px-3 py-1 bg-slate-500/15 text-slate-700 dark:text-slate-300 dark:bg-slate-500/20 rounded-full text-xs font-semibold">
             Pending
           </span>
         );
@@ -117,10 +117,10 @@ export function PastSignals() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="bg-white dark:bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
+            <div className="bg-white dark:bg-slate-800/60 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-6 shadow-sm dark:shadow-none">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-cyan-600/20 rounded-lg flex items-center justify-center">
-                  <BarChart3 className="w-5 h-5 text-cyan-400" />
+                <div className="w-10 h-10 bg-cyan-600/20 dark:bg-cyan-500/15 rounded-lg flex items-center justify-center">
+                  <BarChart3 className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
                 </div>
                 <div>
                   <p className="text-sm text-slate-600 dark:text-slate-400">Total Signals</p>
@@ -129,44 +129,44 @@ export function PastSignals() {
               </div>
             </div>
 
-            <div className="bg-white dark:bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
+            <div className="bg-white dark:bg-slate-800/60 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-6 shadow-sm dark:shadow-none">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-emerald-600/20 rounded-lg flex items-center justify-center">
-                  <Target className="w-5 h-5 text-emerald-400" />
+                <div className="w-10 h-10 bg-emerald-600/20 dark:bg-emerald-500/15 rounded-lg flex items-center justify-center">
+                  <Target className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
                   <p className="text-sm text-slate-600 dark:text-slate-400">Successful</p>
-                  <p className="text-2xl font-bold text-emerald-400">{stats.successful}</p>
+                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{stats.successful}</p>
                 </div>
               </div>
             </div>
 
-            <div className="bg-white dark:bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
+            <div className="bg-white dark:bg-slate-800/60 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-6 shadow-sm dark:shadow-none">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-red-600/20 rounded-lg flex items-center justify-center">
-                  <XCircle className="w-5 h-5 text-red-400" />
+                <div className="w-10 h-10 bg-red-600/20 dark:bg-red-500/15 rounded-lg flex items-center justify-center">
+                  <XCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
                 </div>
                 <div>
                   <p className="text-sm text-slate-600 dark:text-slate-400">Failed</p>
-                  <p className="text-2xl font-bold text-red-400">{stats.failed}</p>
+                  <p className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.failed}</p>
                 </div>
               </div>
             </div>
 
-            <div className="bg-gradient-to-br from-emerald-600/20 to-cyan-600/20 backdrop-blur-sm border border-emerald-600/30 rounded-2xl p-6">
+            <div className="bg-gradient-to-br from-emerald-600/15 to-cyan-600/15 dark:from-emerald-900/40 dark:to-cyan-900/30 backdrop-blur-sm border border-emerald-600/25 dark:border-emerald-500/25 rounded-2xl p-6">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 bg-emerald-600/30 rounded-lg flex items-center justify-center">
-                  <Award className="w-5 h-5 text-emerald-300" />
+                <div className="w-10 h-10 bg-emerald-600/25 dark:bg-emerald-500/20 rounded-lg flex items-center justify-center">
+                  <Award className="w-5 h-5 text-emerald-700 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-sm text-emerald-300/80">Accuracy Rate</p>
-                  <p className="text-2xl font-bold text-emerald-200">{stats.accuracy.toFixed(1)}%</p>
+                  <p className="text-sm text-emerald-800/80 dark:text-emerald-400/90">Accuracy Rate</p>
+                  <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{stats.accuracy.toFixed(1)}%</p>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+          <div className="bg-white dark:bg-slate-800/60 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm dark:shadow-none">
             <div className="p-6 border-b border-slate-200 dark:border-slate-700">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">Signal History</h3>
               <p className="text-sm text-slate-600 dark:text-slate-400">All closed signals with outcomes</p>
@@ -174,7 +174,7 @@ export function PastSignals() {
 
             {loading ? (
               <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-2 border-slate-200 dark:border-slate-600 border-t-emerald-500 dark:border-t-emerald-400" />
               </div>
             ) : signals.length === 0 ? (
               <div className="p-12 text-center">
@@ -190,7 +190,7 @@ export function PastSignals() {
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
-                    <tr className="bg-slate-100 dark:bg-slate-50 dark:bg-slate-900/50">
+                    <tr className="bg-slate-100 dark:bg-slate-900/70">
                       <th className="text-left px-6 py-4 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
                         Asset
                       </th>
@@ -225,7 +225,10 @@ export function PastSignals() {
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                     {signals.map((signal) => (
-                      <tr key={signal.id} className="hover:bg-white/80 dark:bg-white dark:bg-slate-800/30 transition-colors">
+                      <tr
+                        key={signal.id}
+                        className="bg-white/0 dark:bg-transparent hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
+                      >
                         <td className="px-6 py-4">
                           <div>
                             <div className="font-semibold text-slate-900 dark:text-white">{signal.mt5_symbol || signal.symbol}</div>

@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import { playNewSignalAlert, unlockAudio } from '../lib/soundAlert';
 import logoLight from '../assets/Vixai-logo.png';
 import logoDark from '../assets/Vixai-logo-dark.png';
+import { TradingModeBanner } from './TradingModeBanner';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -13,7 +14,7 @@ interface DashboardLayoutProps {
 }
 
 export function DashboardLayout({ children, currentPage }: DashboardLayoutProps) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, tradingMode, setTradingMode } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
@@ -61,7 +62,7 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
               <img
                 src={theme === 'dark' ? logoDark : logoLight}
                 alt="VixAI"
-                className="h-11 w-auto rounded-lg object-contain"
+                className="h-9 w-auto rounded-lg object-contain"
               />
               
             </div>
@@ -129,6 +130,32 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
                 <Menu className="w-6 h-6" />
               </button>
               <div className="flex items-center gap-4 ml-auto">
+                <div className="hidden sm:inline-flex items-center rounded-full border border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/30 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setTradingMode('demo')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                      tradingMode === 'demo'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                    }`}
+                    aria-pressed={tradingMode === 'demo'}
+                  >
+                    Demo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTradingMode('live')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                      tradingMode === 'live'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                    }`}
+                    aria-pressed={tradingMode === 'live'}
+                  >
+                    Live
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -160,6 +187,7 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
           </header>
 
           <main className="p-6">
+            {/* <TradingModeBanner /> */}
             {children}
           </main>
         </div>

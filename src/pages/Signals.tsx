@@ -3,8 +3,9 @@ import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity, Play } from 'lucide-react';
+import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity } from 'lucide-react';
 import { SignalModal } from '../components/SignalModal';
+import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 
 interface Signal {
   id: string;
@@ -37,11 +38,11 @@ interface AnalysisLogEntry {
 }
 
 function LiveAnalysisConsoleInline() {
-  const [results, setResults] = useState<any | null>(null);
+  const [, setResults] = useState<any | null>(null);
   const [logs, setLogs] = useState<AnalysisLogEntry[]>([]);
   const [nextScanTime, setNextScanTime] = useState<string | null>(null);
   const [timeUntilScan, setTimeUntilScan] = useState<string>('');
-  const [autoScanEnabled, setAutoScanEnabled] = useState<boolean>(true);
+  const [autoScanEnabled] = useState<boolean>(true);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const hasRunInitialScan = useRef(false);
 
@@ -281,13 +282,55 @@ export function Signals() {
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const previousSignalIdsRef = useRef<Set<string>>(new Set());
   const [showLiveAnalysis, setShowLiveAnalysis] = useState(false);
+  const [mt5Connected, setMt5Connected] = useState<boolean | null>(null);
+  const [isVerifiedMember, setIsVerifiedMember] = useState<boolean | null>(null);
+
+  const checkMt5Connected = async () => {
+    if (!user?.id) {
+      setMt5Connected(false);
+      return;
+    }
+    const { data } = await supabase
+      .from('ea_connections')
+      .select('status,last_ping')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(5);
+
+    const rows = data || [];
+    const now = Date.now();
+    const isConnected = rows.some((r: any) => {
+      if (String(r?.status || '').toLowerCase() !== 'online') return false;
+      const lastPing = r?.last_ping ? new Date(r.last_ping).getTime() : 0;
+      if (!lastPing) return false;
+      return now - lastPing <= 5 * 60 * 1000; // 5 minutes
+    });
+    setMt5Connected(isConnected);
+  };
+
+  const checkVerifiedMember = async () => {
+    if (!user?.id) {
+      setIsVerifiedMember(false);
+      return;
+    }
+    const { data } = await supabase
+      .from('mt5_accounts')
+      .select('verified')
+      .eq('user_id', user.id)
+      .eq('verified', true)
+      .limit(1);
+    setIsVerifiedMember((data || []).length > 0);
+  };
 
   useEffect(() => {
-    loadSignals();
-    monitorSignalPrices();
+    checkMt5Connected();
+    checkVerifiedMember();
 
     // Poll for new signals every 30s so list updates when signals are created from Live Analysis (Realtime can miss or be disabled)
-    const pollInterval = setInterval(loadSignals, 30000);
+    const pollInterval = setInterval(() => {
+      checkMt5Connected();
+      checkVerifiedMember();
+    }, 30000);
 
     // Real-time subscription for new signals (show all; backend controls quality)
     const subscription = supabase
@@ -336,6 +379,16 @@ export function Signals() {
       clearInterval(pollInterval);
     };
   }, [user]);
+
+  useEffect(() => {
+    if (mt5Connected) {
+      loadSignals();
+      monitorSignalPrices();
+    } else {
+      setSignals([]);
+      setLoading(false);
+    }
+  }, [mt5Connected]);
 
   const monitorSignalPrices = async () => {
     try {
@@ -436,138 +489,169 @@ export function Signals() {
             <h2 className="text-3xl font-bold text-black dark:text-white mb-2">Trading Signals</h2>
             <p className="text-slate-600 dark:text-slate-400">AI-powered Volatility Index trading signals will appear here</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowLiveAnalysis((prev) => !prev)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
-          >
-            <Activity className="w-4 h-4" />
-            {showLiveAnalysis ? 'Hide Live Analysis Console' : 'Show Live Analysis Console'}
-          </button>
 
-          <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-lg dark:shadow-none">
-            <div className="p-6 border-b border-slate-300 dark:border-slate-700">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-bold text-black dark:text-white">Active Signals</h3>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">{activeSignalsList.length} Signal{activeSignalsList.length !== 1 ? 's' : ''} Available</p>
-                </div>
-                
+          {mt5Connected === false && (
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6">
+              <h3 className="text-lg font-bold text-yellow-700 dark:text-yellow-300 mb-2">Connect MT5 to view Live Signals</h3>
+              <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">
+                Live Signals are only available when your MT5 Expert Advisor is connected and sending heartbeats.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <a
+                  href="#settings"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
+                >
+                  Go to Settings
+                </a>
+                <a
+                  href={DERIV_MT5_CREATE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-medium rounded-lg transition-colors"
+                >
+                  Create MT5 on Deriv
+                </a>
               </div>
             </div>
+          )}
 
-            {loading ? (
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
-              </div>
-            ) : activeSignalsList.length === 0 ? (
-              <div className="p-12 text-center">
-                <div className="w-16 h-16 bg-emerald-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Activity className="w-8 h-8 text-emerald-600 dark:text-emerald-400 animate-pulse" />
-                </div>
-                <h3 className="text-xl font-bold text-black dark:text-white mb-2">AI is looking for trading opportunities...</h3>
-                <p className="text-slate-600 dark:text-slate-400">
-                  New signals will appear here automatically when high-probability setups are detected
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-700">
-                {Object.entries(groupedSignals).map(([dateLabel, dateSignals]) => (
-                  <div key={dateLabel} className="p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <Clock className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-                      <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">{dateLabel}</h4>
-                    </div>
-                    <div className="space-y-3">
-                      {dateSignals.map((signal) => (
-                        <div
-                          key={signal.id}
-                          onClick={() => setSelectedSignal(signal)}
-                          className="group bg-slate-50 dark:bg-slate-900/30 hover:bg-slate-100 dark:hover:bg-slate-900/50 border border-slate-300 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl p-4 transition-all shadow-sm hover:shadow-md dark:shadow-none cursor-pointer"
-                        >
-                          <div className="flex flex-wrap items-center gap-3 text-sm">
-                            <div className="flex items-center gap-2 min-w-[80px]">
-                              <Clock className="w-4 h-4 text-slate-500" />
-                              <span className="font-semibold text-black dark:text-white">{formatTime(signal.created_at)}</span>
-                            </div>
+          {isVerifiedMember !== false && (
+            <button
+              type="button"
+              onClick={() => setShowLiveAnalysis((prev) => !prev)}
+              disabled={mt5Connected === false}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+            >
+              <Activity className="w-4 h-4" />
+              {showLiveAnalysis ? 'Hide Live Analysis Console' : 'Show Live Analysis Console'}
+            </button>
+          )}
 
-                            <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
-
-                            <div className="min-w-[180px]">
-                              <span className="font-semibold text-cyan-600 dark:text-cyan-400">{signal.mt5_symbol || signal.symbol}</span>
-                            </div>
-
-                            <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
-
-                            {signal.direction === 'BUY' ? (
-                              <div className="flex items-center gap-2 min-w-[60px]">
-                                <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                                <span className="font-bold text-emerald-600 dark:text-emerald-400">BUY</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2 min-w-[60px]">
-                                <TrendingDown className="w-4 h-4 text-red-600 dark:text-red-400" />
-                                <span className="font-bold text-red-600 dark:text-red-400">SELL</span>
-                              </div>
-                            )}
-
-                            <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
-
-                            <div className="flex items-center gap-2">
-                              <span className="text-slate-600 dark:text-slate-400">Entry:</span>
-                              <span className="font-mono font-semibold text-black dark:text-white">{signal.entry_price.toFixed(2)}</span>
-                            </div>
-
-                            <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
-
-                            <div className="flex items-center gap-2">
-                              <Target className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                              <span className="text-slate-600 dark:text-slate-400">TP:</span>
-                              <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                                {signal.tp1 ? signal.tp1.toFixed(2) : signal.take_profit.toFixed(2)}
-                              </span>
-                            </div>
-
-                            <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
-
-                            <div className="flex items-center gap-2">
-                              <Shield className="w-4 h-4 text-red-600 dark:text-red-400" />
-                              <span className="text-slate-600 dark:text-slate-400">SL:</span>
-                              <span className="font-mono font-semibold text-red-600 dark:text-red-400">{signal.stop_loss.toFixed(2)}</span>
-                            </div>
-
-                            <div className="ml-auto">
-                              <span className="inline-flex items-center px-3 py-1 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 rounded-full text-xs font-bold">
-                                {signal.confidence_percentage || signal.confidence}% Confidence
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* {(signal.tp2 || signal.tp3) && (
-                            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-300 dark:border-slate-700/50 flex items-center gap-4 text-xs">
-                              <span className="text-slate-500">Additional Targets:</span>
-                              {signal.tp2 && (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-slate-600 dark:text-slate-400">TP2:</span>
-                                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{signal.tp2.toFixed(2)}</span>
-                                </div>
-                              )}
-                              {signal.tp3 && (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-slate-600 dark:text-slate-400">TP3:</span>
-                                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{signal.tp3.toFixed(2)}</span>
-                                </div>
-                              )}
-                            </div>
-                          )} */}
-                        </div>
-                      ))}
-                    </div>
+          {isVerifiedMember !== false && (
+            <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-lg dark:shadow-none">
+              <div className="p-6 border-b border-slate-300 dark:border-slate-700">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-black dark:text-white">Active Signals</h3>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">{activeSignalsList.length} Signal{activeSignalsList.length !== 1 ? 's' : ''} Available</p>
                   </div>
-                ))}
+                  
+                </div>
               </div>
-            )}
-          </div>
+
+              {loading ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
+                </div>
+              ) : activeSignalsList.length === 0 ? (
+                <div className="p-12 text-center">
+                  <div className="w-16 h-16 bg-emerald-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Activity className="w-8 h-8 text-emerald-600 dark:text-emerald-400 animate-pulse" />
+                  </div>
+                  <h3 className="text-xl font-bold text-black dark:text-white mb-2">AI is looking for trading opportunities...</h3>
+                  <p className="text-slate-600 dark:text-slate-400">
+                    New signals will appear here automatically when high-probability setups are detected
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-700">
+                  {Object.entries(groupedSignals).map(([dateLabel, dateSignals]) => (
+                    <div key={dateLabel} className="p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Clock className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                        <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">{dateLabel}</h4>
+                      </div>
+                      <div className="space-y-3">
+                        {dateSignals.map((signal) => (
+                          <div
+                            key={signal.id}
+                            onClick={() => setSelectedSignal(signal)}
+                            className="group bg-slate-50 dark:bg-slate-900/30 hover:bg-slate-100 dark:hover:bg-slate-900/50 border border-slate-300 dark:border-slate-700/50 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl p-4 transition-all shadow-sm hover:shadow-md dark:shadow-none cursor-pointer"
+                          >
+                            <div className="flex flex-wrap items-center gap-3 text-sm">
+                              <div className="flex items-center gap-2 min-w-[80px]">
+                                <Clock className="w-4 h-4 text-slate-500" />
+                                <span className="font-semibold text-black dark:text-white">{formatTime(signal.created_at)}</span>
+                              </div>
+
+                              <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
+
+                              <div className="min-w-[180px]">
+                                <span className="font-semibold text-cyan-600 dark:text-cyan-400">{signal.mt5_symbol || signal.symbol}</span>
+                              </div>
+
+                              <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
+
+                              {signal.direction === 'BUY' ? (
+                                <div className="flex items-center gap-2 min-w-[60px]">
+                                  <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400">BUY</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 min-w-[60px]">
+                                  <TrendingDown className="w-4 h-4 text-red-600 dark:text-red-400" />
+                                  <span className="font-bold text-red-600 dark:text-red-400">SELL</span>
+                                </div>
+                              )}
+
+                              <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-slate-600 dark:text-slate-400">Entry:</span>
+                                <span className="font-mono font-semibold text-black dark:text-white">{signal.entry_price.toFixed(2)}</span>
+                              </div>
+
+                              <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
+
+                              <div className="flex items-center gap-2">
+                                <Target className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                                <span className="text-slate-600 dark:text-slate-400">TP:</span>
+                                <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                  {signal.tp1 ? signal.tp1.toFixed(2) : signal.take_profit.toFixed(2)}
+                                </span>
+                              </div>
+
+                              <div className="h-4 w-px bg-slate-200 dark:bg-slate-700"></div>
+
+                              <div className="flex items-center gap-2">
+                                <Shield className="w-4 h-4 text-red-600 dark:text-red-400" />
+                                <span className="text-slate-600 dark:text-slate-400">SL:</span>
+                                <span className="font-mono font-semibold text-red-600 dark:text-red-400">{signal.stop_loss.toFixed(2)}</span>
+                              </div>
+
+                              <div className="ml-auto">
+                                <span className="inline-flex items-center px-3 py-1 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 rounded-full text-xs font-bold">
+                                  {signal.confidence_percentage || signal.confidence}% Confidence
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* {(signal.tp2 || signal.tp3) && (
+                              <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-300 dark:border-slate-700/50 flex items-center gap-4 text-xs">
+                                <span className="text-slate-500">Additional Targets:</span>
+                                {signal.tp2 && (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-slate-600 dark:text-slate-400">TP2:</span>
+                                    <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{signal.tp2.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                {signal.tp3 && (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-slate-600 dark:text-slate-400">TP3:</span>
+                                    <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{signal.tp3.toFixed(2)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )} */}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {showLiveAnalysis && <LiveAnalysisConsoleInline />}
         </div>

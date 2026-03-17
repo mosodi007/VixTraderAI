@@ -29,20 +29,20 @@ export function getPointSize(symbol: string): number {
   return SYMBOL_POINT_SIZE[key] ?? 0.01;
 }
 
-/** SL and TP in Deriv "points" (display units) per symbol; converted to price via point size. */
+/** SL and TP in Deriv "points"; TP is always 3× SL (1:3 R:R in price). */
 export const SYMBOL_SL_TP_POINTS: Record<string, { slPoints: number; tpPoints: number }> = {
-  R_10: { slPoints: 4000, tpPoints: 8000 },
-  R_50: { slPoints: 4000, tpPoints: 8000 },
-  R_100: { slPoints: 400, tpPoints: 800 },
-  stpRNG: { slPoints: 40, tpPoints: 80 },
-  '1HZ10V': { slPoints: 400, tpPoints: 800 },
-  '1HZ30V': { slPoints: 20000, tpPoints: 60000 }, // 1:3 RR
-  '1HZ75V': { slPoints: 20000, tpPoints: 60000 }, // 1:3 RR
-  '1HZ50V': { slPoints: 200000, tpPoints: 400000 },
-  '1HZ90V': { slPoints: 100000, tpPoints: 200000 },
-  '1HZ100V': { slPoints: 2000, tpPoints: 4000 },
-  JD25: { slPoints: 40000, tpPoints: 80000 },
-  STPIDX: { slPoints: 40, tpPoints: 80 },
+  R_10: { slPoints: 8000, tpPoints: 24000 },
+  R_50: { slPoints: 8000, tpPoints: 24000 },
+  R_100: { slPoints: 800, tpPoints: 2400 },
+  stpRNG: { slPoints: 80, tpPoints: 240 },
+  '1HZ10V': { slPoints: 800, tpPoints: 2400 },
+  '1HZ30V': { slPoints: 40000, tpPoints: 120000 },
+  '1HZ75V': { slPoints: 40000, tpPoints: 120000 },
+  '1HZ50V': { slPoints: 400000, tpPoints: 1200000 },
+  '1HZ90V': { slPoints: 200000, tpPoints: 600000 },
+  '1HZ100V': { slPoints: 4000, tpPoints: 12000 },
+  JD25: { slPoints: 80000, tpPoints: 240000 },
+  STPIDX: { slPoints: 80, tpPoints: 240 },
 };
 
 /**
@@ -62,8 +62,8 @@ export function getSlTpDistanceInPrice(
       tpDistance: points.tpPoints * pointSize,
     };
   }
-  console.warn(`[symbol-sl-tp] Unknown symbol "${symbol}", using default 400/800 points. Add to SYMBOL_SL_TP_POINTS if needed.`);
-  return { slDistance: 400 * pointSize, tpDistance: 800 * pointSize };
+  console.warn(`[symbol-sl-tp] Unknown symbol "${symbol}", using default 800/2400 points (1:3). Add to SYMBOL_SL_TP_POINTS if needed.`);
+  return { slDistance: 800 * pointSize, tpDistance: 2400 * pointSize };
 }
 
 /**

@@ -17,6 +17,7 @@ export interface Database {
           id: string;
           email: string;
           full_name: string | null;
+          trading_mode?: 'demo' | 'live';
           created_at: string;
           updated_at: string;
         };
@@ -24,6 +25,7 @@ export interface Database {
           id: string;
           email: string;
           full_name?: string | null;
+          trading_mode?: 'demo' | 'live';
           created_at?: string;
           updated_at?: string;
         };
@@ -31,6 +33,7 @@ export interface Database {
           id?: string;
           email?: string;
           full_name?: string | null;
+          trading_mode?: 'demo' | 'live';
           created_at?: string;
           updated_at?: string;
         };

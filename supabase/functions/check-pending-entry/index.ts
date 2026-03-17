@@ -92,7 +92,11 @@ Deno.serve(async (req: Request) => {
         const direction: "BUY" | "SELL" = pending.direction;
         const suggestedEntry: number = Number(pending.suggested_entry);
         const stopLoss: number = Number(pending.stop_loss);
-        const takeProfit: number = Number(pending.take_profit);
+        const riskPending = Math.abs(suggestedEntry - stopLoss);
+        const takeProfit: number =
+          direction === "BUY"
+            ? suggestedEntry + 3 * riskPending
+            : suggestedEntry - 3 * riskPending;
 
         console.log(`[PENDING][${symbol}] Checking pending setup ${pending.id} (${direction})`);
 
@@ -195,7 +199,7 @@ Deno.serve(async (req: Request) => {
 
         // Convert pending setup into live signal
         const mt5Symbol = derivAPI.getMT5Symbol(symbol);
-        const risk = Math.abs(suggestedEntry - stopLoss);
+        const risk = riskPending;
         const riskRewardRatio = risk > 0 ? 3 : 0;
 
         const { data: newSignal, error: insertError } = await supabase

@@ -129,14 +129,23 @@ export function Login() {
               disabled={loading}
               className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
             >
-              {loading ? 'Please wait...' : isSignUp ? 'Create Account' : 'Sign In'}
+              {loading ? 'Please wait...' : isSignUp ? 'Sign up' : 'Sign In'}
             </button>
           </form>
 
           {isSignUp && (
             <div className="mt-6 p-4 bg-emerald-600/10 border border-emerald-600/30 rounded-lg">
               <p className="text-sm text-emerald-600 dark:text-emerald-400">
-                After signing up, you'll need to create an MT5 account through our partner link to access trading signals.
+                After signing up, create your Deriv MT5 account on{' '}
+                <a
+                  href="https://track.deriv.com/_Yqc93056kqBnhKTx4PKacmNd7ZgqdRLk/143/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-medium"
+                >
+                  deriv.com
+                </a>
+                , then add your login in Settings.
               </p>
             </div>
           )}

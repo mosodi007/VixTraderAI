@@ -21,8 +21,6 @@ input int    PollIntervalSeconds = 5;   // also used as snapshot interval
 input int    HttpTimeoutMs       = 5000;
 
 //--- execution
-input double FixedLot            = 0.20;
-input double RiskPercent         = 0.0;   // if > 0, risk-based sizing (basic)
 input int    SlippagePoints      = 20;
 input int    MagicNumberBase     = 123456;
 input bool   AllowNewTrades      = true;
@@ -266,27 +264,21 @@ bool HttpPost(const string url, const string body, string &response, int &http_s
 }
 
 //+------------------------------------------------------------------+
-double ComputeLots(const string symbol, const double entry_price, const double stop_loss, const double backend_lot)
+double ComputeLotsFromInstruction(const string symbol, const string lot_mode, const double fixed_lot, const double percent, const string percent_formula)
 {
-  if(backend_lot > 0.0) return backend_lot;
-
-  if(RiskPercent > 0.0 && entry_price > 0.0 && stop_loss > 0.0)
+  if(lot_mode == "percent_balance")
   {
+    // percent_formula currently supported: lots_per_1000
+    // lot = (balance * percent/100) / 1000
     double bal = AccountInfoDouble(ACCOUNT_BALANCE);
-    double risk_money = bal * (RiskPercent/100.0);
-
-    double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-    double contract = SymbolInfoDouble(symbol, SYMBOL_TRADE_CONTRACT_SIZE);
-    double sl_points = MathAbs(entry_price - stop_loss) / point;
-
-    if(sl_points > 0.0 && contract > 0.0)
-    {
-      double lots = risk_money / (sl_points * contract);
-      if(lots > 0.0) return lots;
-    }
+    double p = MathMax(0.0, percent);
+    if(percent_formula == "lots_per_1000" && bal > 0.0 && p > 0.0)
+      return (bal * (p/100.0)) / 1000.0;
   }
 
-  return FixedLot;
+  // Default to fixed-lot sizing (per-instruction)
+  if(fixed_lot > 0.0) return fixed_lot;
+  return 0.01;
 }
 
 double NormalizeLots(const string symbol, double lots)
@@ -453,7 +445,9 @@ void PushPositionsSnapshot()
 void ExecuteInstruction(const string obj)
 {
   string signal_id="", symbol="", direction="", entry_type="", comment="";
-  double entry_price=0.0, stop_loss=0.0, take_profit=0.0, lot_size=0.0;
+  string lot_mode="", percent_formula="";
+  double entry_price=0.0, stop_loss=0.0, take_profit=0.0;
+  double fixed_lot=0.0, percent=0.0;
   double magic_num=MagicNumberBase;
 
   if(!ExtractStringField(obj, "signal_id", signal_id)) return;
@@ -467,8 +461,11 @@ void ExecuteInstruction(const string obj)
   ExtractNumberField(obj, "entry_price", entry_price);
   ExtractNumberField(obj, "stop_loss", stop_loss);
   ExtractNumberField(obj, "take_profit", take_profit);
-  ExtractNumberField(obj, "lot_size", lot_size);
   ExtractNumberField(obj, "magic", magic_num);
+  ExtractStringField(obj, "lot_mode", lot_mode);
+  ExtractNumberField(obj, "fixed_lot", fixed_lot);
+  ExtractNumberField(obj, "percent", percent);
+  ExtractStringField(obj, "percent_formula", percent_formula);
 
   if(!AllowNewTrades) { Log("Trades disabled. Skipping " + signal_id); return; }
   if(symbol=="" || direction=="") { Log("Invalid instruction missing symbol/direction"); return; }
@@ -495,7 +492,7 @@ void ExecuteInstruction(const string obj)
   double price = (direction=="BUY" ? ask : bid);
   if(entry_price<=0.0) entry_price = price;
 
-  double lots = ComputeLots(symbol, entry_price, stop_loss, lot_size);
+  double lots = ComputeLotsFromInstruction(symbol, lot_mode, fixed_lot, percent, percent_formula);
   lots = NormalizeLots(symbol, lots);
 
   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);

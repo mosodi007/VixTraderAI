@@ -4,6 +4,7 @@ import { createDerivAPI } from "../_shared/deriv-api.ts";
 import { createSignalDetector } from "../_shared/advanced-signal-detector.ts";
 import { refineSignalWithICT } from "../_shared/ict-signal-refiner.ts";
 import { SYMBOL_SL_TP_POINTS, getPointSize } from "../_shared/symbol-sl-tp.ts";
+import { lastClosedCandleConfirms } from "../_shared/confirmation-candle.ts";
 import { sendSignalEmail, getSignalNotificationEmails } from "../_shared/resend.ts";
 
 const corsHeaders = {
@@ -51,13 +52,19 @@ Deno.serve(async (req: Request) => {
     // Load adaptive filter thresholds (global)
     const { data: filterCfg } = await supabase
       .from("signal_filters_config")
-      .select("high_vol_percentile,strong_trend_strength,require_trend_alignment,require_structure_alignment")
+      .select(
+        "high_vol_percentile,strong_trend_strength,require_trend_alignment,require_structure_alignment,require_swing_market,min_chop_ratio,min_swing_reversals,swing_lookback_candles",
+      )
       .eq("id", "global")
       .maybeSingle();
-    const highVolPercentile = Number(filterCfg?.high_vol_percentile ?? 0.7);
+    const highVolPercentile = Number(filterCfg?.high_vol_percentile ?? 0.55);
     const strongTrendStrength = Number(filterCfg?.strong_trend_strength ?? 1.2);
     const requireTrendAlignment = filterCfg?.require_trend_alignment ?? true;
     const requireStructureAlignment = filterCfg?.require_structure_alignment ?? true;
+    const requireSwingMarket = filterCfg?.require_swing_market ?? true;
+    const minChopRatio = Number(filterCfg?.min_chop_ratio ?? 1.75);
+    const minSwingReversals = Number(filterCfg?.min_swing_reversals ?? 7);
+    const swingLookbackCandles = Number(filterCfg?.swing_lookback_candles ?? 40);
 
     // Fetch per-symbol SL/TP points from symbol_sl_tp_config (Settings page)
     const { data: configRows } = await supabase.from('symbol_sl_tp_config').select('symbol, sl_points, tp_points');
@@ -65,9 +72,9 @@ Deno.serve(async (req: Request) => {
     if (configRows?.length) {
       for (const row of configRows) {
         const sl = Number(row.sl_points);
-        const tp = Number(row.tp_points);
-        if (Number.isFinite(sl) && Number.isFinite(tp) && sl > 0 && tp > 0) {
-          pointsBySymbol[row.symbol] = { slPoints: sl, tpPoints: tp };
+        if (Number.isFinite(sl) && sl > 0) {
+          const slR = Math.round(sl);
+          pointsBySymbol[row.symbol] = { slPoints: slR, tpPoints: slR * 3 };
         }
       }
       console.log(`[AUTO-SCAN] Loaded points for ${Object.keys(pointsBySymbol).length} symbols from config`);
@@ -75,7 +82,7 @@ Deno.serve(async (req: Request) => {
 
     // List of symbols to monitor
     // Removed: R_10, R_50, 1HZ50V, 1HZ90V, JD25
-    const symbols = ['1HZ30V', '1HZ75V'];
+    const symbols = ['1HZ10V','1HZ30V','1HZ75V','1HZ100V'];
     const timeframe = 'M1';
 
     const results: AutoSignalResult[] = [];
@@ -122,7 +129,9 @@ Deno.serve(async (req: Request) => {
         const derivAPI = createDerivAPI();
         console.log(`[${symbol}] Fetching market data...`);
 
-        const ticks = await derivAPI.getTickHistory(symbol, 200);
+        // Fetch a bit more history so realized-vol percentile + EMA slope/structure are more stable.
+        // Extra ticks so 5s swing metrics have enough bars (zig-zag gate)
+        const ticks = await derivAPI.getTickHistory(symbol, 800);
 
         if (!ticks || ticks.length < 100) {
           console.log(`[${symbol}] Insufficient market data.`);
@@ -138,7 +147,7 @@ Deno.serve(async (req: Request) => {
         console.log(`[${symbol}] 🔍 STARTING ANALYSIS with ${ticks.length} ticks...`);
         console.log(`[${symbol}] Current Price: ${ticks[ticks.length - 1].quote}`);
 
-        const points = pointsBySymbol[symbol] ?? SYMBOL_SL_TP_POINTS[symbol] ?? { slPoints: 400, tpPoints: 800 };
+        const points = pointsBySymbol[symbol] ?? SYMBOL_SL_TP_POINTS[symbol] ?? { slPoints: 800, tpPoints: 2400 };
         const detector = createSignalDetector(ticks, {
           slPoints: points.slPoints,
           tpPoints: points.tpPoints,
@@ -146,6 +155,10 @@ Deno.serve(async (req: Request) => {
           strongTrendStrength,
           requireTrendAlignment,
           requireStructureAlignment,
+          requireSwingMarket,
+          minChopRatio: Number.isFinite(minChopRatio) ? minChopRatio : 1.75,
+          minSwingReversals: Number.isFinite(minSwingReversals) ? Math.max(3, Math.round(minSwingReversals)) : 7,
+          swingLookbackCandles: Number.isFinite(swingLookbackCandles) ? Math.round(swingLookbackCandles) : 40,
         });
         const detection = detector.detectSignal(symbol, timeframe);
 
@@ -158,7 +171,7 @@ Deno.serve(async (req: Request) => {
         console.log(`[${symbol}] Risk-Reward: ${detection.riskRewardRatio}:1`);
         if (detection.filters) {
           console.log(
-            `[${symbol}] Filters: rv_pct=${detection.filters.realizedVolPercentile.toFixed(2)} (${detection.filters.volatilityRegime}), ema=${detection.filters.trendEma}, structure=${detection.filters.trendStructure}, strength=${detection.filters.trendStrength.toFixed(2)}, allowed=${detection.filters.allowed}, blocked=${detection.filters.blockedReasons.join('|')}`
+            `[${symbol}] Filters: rv_pct=${detection.filters.realizedVolPercentile.toFixed(2)} (${detection.filters.volatilityRegime}), ema=${detection.filters.trendEma}, structure=${detection.filters.trendStructure}, strength=${detection.filters.trendStrength.toFixed(2)}, chop=${detection.filters.chopRatio}, rev=${detection.filters.closeReversals}, allowed=${detection.filters.allowed}, blocked=${detection.filters.blockedReasons.join('|')}`
           );
         }
 
@@ -193,6 +206,34 @@ Deno.serve(async (req: Request) => {
             reason: detection.reasoning,
             confidence: detection.confidence
           };
+        }
+
+        const confIntervalSec = Number(Deno.env.get("CONFIRMATION_CANDLE_INTERVAL_SEC")) || 60;
+        const confMinBody = Number(
+          Deno.env.get("CONFIRMATION_MIN_BODY_RATIO") ?? "0.08",
+        );
+        if (Deno.env.get("REQUIRE_CONFIRMATION_CANDLE") !== "false") {
+          const { ok: confOk, detail: confDetail } = lastClosedCandleConfirms(
+            detection.direction,
+            ticks,
+            confIntervalSec,
+            Number.isFinite(confMinBody) ? Math.max(0.02, confMinBody) : 0.08,
+          );
+          if (!confOk) {
+            console.log(
+              `[${symbol}] No confirmation candle yet (${confIntervalSec}s bar): ${confDetail}`,
+            );
+            return {
+              symbol,
+              signalGenerated: false,
+              reason:
+                `Awaiting confirmation: last closed ${confIntervalSec}s candle must be ` +
+                `${detection.direction === "BUY" ? "bullish (close > open)" : "bearish (close < open)"} with meaningful body. (${confDetail})`,
+              confidence: detection.confidence,
+              direction: detection.direction,
+            };
+          }
+          console.log(`[${symbol}] Confirmation candle OK: ${confDetail}`);
         }
 
         // Manipulation phase high/low (recent range before the move; used for SL placement)
@@ -235,8 +276,34 @@ Deno.serve(async (req: Request) => {
           console.log(`[${symbol}] ICT refined: Entry ${entryPrice}, SL ${stopLoss}`);
         }
 
-        // Enforce minimum SL distance (enough room): min_sl_distance = max(2*ATR, pointSize*30)
         const pointSize = getPointSize(symbol);
+        // SL must sit *past* recent-range highs/lows — those levels are swept first; stops there get hunted.
+        const sweepAtrMult = Number(Deno.env.get("SL_BEYOND_MANIPULATION_ATR")) || 1.35;
+        const sweepMinPts = Number(Deno.env.get("SL_SWEEP_BUFFER_POINTS")) || 100;
+        const sweepBuffer = Math.max(atr * sweepAtrMult, pointSize * sweepMinPts);
+        if (detection.direction === "BUY") {
+          const slBeyondSweep = manipulation_low - sweepBuffer;
+          if (
+            slBeyondSweep > 0 &&
+            slBeyondSweep < entryPrice &&
+            stopLoss > slBeyondSweep
+          ) {
+            console.log(
+              `[${symbol}] SL moved past liquidity sweep (below manip low ${manipulation_low.toFixed(2)}): ${stopLoss.toFixed(2)} → ${slBeyondSweep.toFixed(2)}`,
+            );
+            stopLoss = slBeyondSweep;
+          }
+        } else {
+          const slBeyondSweep = manipulation_high + sweepBuffer;
+          if (slBeyondSweep > entryPrice && stopLoss < slBeyondSweep) {
+            console.log(
+              `[${symbol}] SL moved past liquidity sweep (above manip high ${manipulation_high.toFixed(2)}): ${stopLoss.toFixed(2)} → ${slBeyondSweep.toFixed(2)}`,
+            );
+            stopLoss = slBeyondSweep;
+          }
+        }
+
+        // Enforce minimum SL distance (enough room): min_sl_distance = max(2*ATR, pointSize*30)
         const minSlDistance = Math.max(atr * 3, pointSize * 80);
         const slDistance = Math.abs(entryPrice - stopLoss);
         if (slDistance < minSlDistance) {
@@ -330,7 +397,7 @@ Deno.serve(async (req: Request) => {
             })));
           }
           generatedSignals.push(newSignal);
-          return { symbol, signalGenerated: true, reason: `${detection.direction} signal at entry (1:2 R:R)`, confidence: detection.confidence, direction: detection.direction };
+          return { symbol, signalGenerated: true, reason: `${detection.direction} signal at entry (1:3 R:R)`, confidence: detection.confidence, direction: detection.direction };
         }
 
         // Price not at entry: store pending setup; signal created when check-pending-entry sees price at entry
@@ -464,4 +531,5 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
 
