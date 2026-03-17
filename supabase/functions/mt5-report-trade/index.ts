@@ -20,21 +20,60 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Auth disabled for now; re-enable later by checking EA_API_TOKEN vs Bearer token
+    // Optional auth: if EA_API_TOKEN is set, require matching Bearer token
+    const expected = Deno.env.get("EA_API_TOKEN") || "";
+    if (expected) {
+      const token = getBearerToken(req) || "";
+      if (token !== expected) {
+        return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !supabaseServiceKey) throw new Error("Supabase configuration missing");
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const body = await req.json();
+    // MT5 WebRequest can omit Content-Type or send urlencoded bodies; also sometimes includes null bytes.
+    // Be tolerant like mt5-get-instructions.
+    const raw = await req.text().catch(() => "");
+    const cleaned = raw.replace(/\u0000/g, "").trim();
+    let body: Record<string, unknown> = {};
+    if (cleaned) {
+      try {
+        const parsed = JSON.parse(cleaned);
+        if (parsed && typeof parsed === "object") body = parsed as Record<string, unknown>;
+      } catch {
+        const out: Record<string, unknown> = {};
+        for (const part of cleaned.split("&")) {
+          const eq = part.indexOf("=");
+          if (eq <= 0) continue;
+          const k = decodeURIComponent(part.slice(0, eq)).trim();
+          const v = decodeURIComponent(part.slice(eq + 1)).trim();
+          if (!k) continue;
+          out[k] = v;
+        }
+        body = out;
+      }
+    }
     const mt5_login = String(body.mt5_login || "").trim();
     const signal_id = String(body.signal_id || "").trim();
     const status = String(body.status || "").trim().toLowerCase(); // opened|closed|modified|error
 
     if (!mt5_login || !signal_id || !status) {
       return new Response(
-        JSON.stringify({ success: false, error: "mt5_login, signal_id, and status are required" }),
+        JSON.stringify({
+          success: false,
+          error: "mt5_login, signal_id, and status are required",
+          debug: {
+            content_type: req.headers.get("content-type") || null,
+            received_keys: Object.keys(body || {}),
+          },
+        }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }

@@ -6,3 +6,9 @@ verify_jwt = false
 
 [functions.mt5-report-trade]
 verify_jwt = false
+
+[functions.mt5-report-account]
+verify_jwt = false
+
+[functions.mt5-report-positions]
+verify_jwt = false

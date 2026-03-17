@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createDerivAPI } from "../_shared/deriv-api.ts";
+import { getPointSize } from "../_shared/symbol-sl-tp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -84,9 +85,8 @@ Deno.serve(async (req: Request) => {
       try {
         console.log(`[${signal.symbol}] Checking signal ${signal.id} (${signal.direction})`);
 
-        // Get current market price
-        const ticks = await derivAPI.getTickHistory(signal.symbol, 1);
-
+        // Get current market price: fetch multiple ticks and use the latest by epoch to avoid stale/wrong tick
+        const ticks = await derivAPI.getTickHistory(signal.symbol, 5);
         if (!ticks || ticks.length === 0) {
           console.log(`[${signal.symbol}] Unable to fetch current price`);
           results.push({
@@ -99,41 +99,54 @@ Deno.serve(async (req: Request) => {
           });
           continue;
         }
+        const sortedTicks = [...ticks].sort((a, b) => (b.epoch ?? 0) - (a.epoch ?? 0));
+        const currentPrice = Number(sortedTicks[0].quote);
+        const entryPrice = Number(signal.entry_price);
+        const stopLoss = Number(signal.stop_loss);
+        const tp1 = Number(signal.tp1 ?? signal.take_profit ?? 0);
+        const tp2 = signal.tp2 != null && Number.isFinite(Number(signal.tp2)) ? Number(signal.tp2) : null;
+        const tp3 = signal.tp3 != null && Number.isFinite(Number(signal.tp3)) ? Number(signal.tp3) : null;
 
-        const currentPrice = ticks[ticks.length - 1].quote;
-        console.log(`[${signal.symbol}] Current: ${currentPrice}, Entry: ${signal.entry_price}, TP1: ${signal.tp1}, SL: ${signal.stop_loss}`);
+        const pointSize = getPointSize(signal.symbol);
+        const tpBuffer = pointSize; // Require price to pass TP by at least one point to avoid false hits
+
+        console.log(`[${signal.symbol}] Current: ${currentPrice}, Entry: ${entryPrice}, TP1: ${tp1}, SL: ${stopLoss}`);
 
         let outcome: string | null = null;
         let profitLoss: number | null = null;
 
-        // Check if TP or SL hit
+        // Only compare to valid numbers; many signals have tp2/tp3 null – comparing price >= null is true in JS (null→0) and caused false TP hits
         if (signal.direction === 'BUY') {
-          if (currentPrice >= signal.tp3) {
-            outcome = 'TP3_HIT';
-            profitLoss = currentPrice - signal.entry_price;
-          } else if (currentPrice >= signal.tp2) {
-            outcome = 'TP2_HIT';
-            profitLoss = currentPrice - signal.entry_price;
-          } else if (currentPrice >= signal.tp1) {
+          const slValid = stopLoss < entryPrice;
+          const tp1Valid = tp1 > entryPrice && Number.isFinite(tp1);
+          if (tp1Valid && slValid && currentPrice >= tp1 + tpBuffer) {
             outcome = 'TP1_HIT';
-            profitLoss = currentPrice - signal.entry_price;
-          } else if (currentPrice <= signal.stop_loss) {
+            profitLoss = currentPrice - entryPrice;
+          } else if (tp2 != null && tp2 > entryPrice && slValid && currentPrice >= tp2 + tpBuffer) {
+            outcome = 'TP2_HIT';
+            profitLoss = currentPrice - entryPrice;
+          } else if (tp3 != null && tp3 > entryPrice && slValid && currentPrice >= tp3 + tpBuffer) {
+            outcome = 'TP3_HIT';
+            profitLoss = currentPrice - entryPrice;
+          } else if (slValid && currentPrice <= stopLoss) {
             outcome = 'SL_HIT';
-            profitLoss = currentPrice - signal.entry_price;
+            profitLoss = currentPrice - entryPrice;
           }
         } else if (signal.direction === 'SELL') {
-          if (currentPrice <= signal.tp3) {
-            outcome = 'TP3_HIT';
-            profitLoss = signal.entry_price - currentPrice;
-          } else if (currentPrice <= signal.tp2) {
-            outcome = 'TP2_HIT';
-            profitLoss = signal.entry_price - currentPrice;
-          } else if (currentPrice <= signal.tp1) {
+          const slValid = stopLoss > entryPrice;
+          const tp1Valid = tp1 < entryPrice && Number.isFinite(tp1);
+          if (tp1Valid && slValid && currentPrice <= tp1 - tpBuffer) {
             outcome = 'TP1_HIT';
-            profitLoss = signal.entry_price - currentPrice;
-          } else if (currentPrice >= signal.stop_loss) {
+            profitLoss = entryPrice - currentPrice;
+          } else if (tp2 != null && tp2 < entryPrice && slValid && currentPrice <= tp2 - tpBuffer) {
+            outcome = 'TP2_HIT';
+            profitLoss = entryPrice - currentPrice;
+          } else if (tp3 != null && tp3 < entryPrice && slValid && currentPrice <= tp3 - tpBuffer) {
+            outcome = 'TP3_HIT';
+            profitLoss = entryPrice - currentPrice;
+          } else if (slValid && currentPrice >= stopLoss) {
             outcome = 'SL_HIT';
-            profitLoss = signal.entry_price - currentPrice;
+            profitLoss = entryPrice - currentPrice;
           }
         }
 

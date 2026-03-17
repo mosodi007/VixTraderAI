@@ -47,6 +47,15 @@ export interface Database {
           rejected_reason: string | null;
           created_at: string;
           verified_at: string | null;
+          balance?: number;
+          equity?: number;
+          margin?: number;
+          free_margin?: number;
+          margin_level?: number;
+          currency?: string;
+          leverage?: number;
+          last_sync?: string | null;
+          password_hash?: string | null;
         };
         Insert: {
           id?: string;
@@ -71,6 +80,65 @@ export interface Database {
           rejected_reason?: string | null;
           created_at?: string;
           verified_at?: string | null;
+          balance?: number;
+          equity?: number;
+          margin?: number;
+          free_margin?: number;
+          margin_level?: number;
+          currency?: string;
+          leverage?: number;
+          last_sync?: string | null;
+          password_hash?: string | null;
+        };
+      };
+      mt5_positions: {
+        Row: {
+          id: string;
+          user_id: string;
+          mt5_login: string;
+          ticket: string;
+          symbol: string;
+          direction: string;
+          volume: number;
+          price_open: number;
+          price_current: number;
+          stop_loss: number | null;
+          take_profit: number | null;
+          profit: number;
+          opened_at: string;
+          last_updated: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          mt5_login: string;
+          ticket: string;
+          symbol: string;
+          direction: string;
+          volume: number;
+          price_open: number;
+          price_current: number;
+          stop_loss?: number | null;
+          take_profit?: number | null;
+          profit?: number;
+          opened_at: string;
+          last_updated?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          mt5_login?: string;
+          ticket?: string;
+          symbol?: string;
+          direction?: string;
+          volume?: number;
+          price_open?: number;
+          price_current?: number;
+          stop_loss?: number | null;
+          take_profit?: number | null;
+          profit?: number;
+          opened_at?: string;
+          last_updated?: string;
         };
       };
       signals: {

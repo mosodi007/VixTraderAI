@@ -5,8 +5,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { AlertCircle, CheckCircle, Clock, ExternalLink } from 'lucide-react';
 import { EAConnectionStatus } from '../components/EAConnectionStatus';
-import { ActivePositions } from '../components/ActivePositions';
 import { PerformanceMetrics } from '../components/PerformanceMetrics';
+import { LiveMT5Positions } from '../components/LiveMT5Positions';
+import { RecentTradeActivity } from '../components/RecentTradeActivity';
 
 export function Dashboard() {
   const { user } = useAuth();
@@ -121,8 +122,8 @@ export function Dashboard() {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2 bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl p-6 shadow-sm dark:shadow-none">
+            <div className="grid grid-cols-1 gap-6">
+              <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl p-6 shadow-sm dark:shadow-none">
                 <h3 className="text-xl font-bold text-black dark:text-white mb-4">MT5 Account Status</h3>
                 <div className="space-y-4">
                   <div>
@@ -146,24 +147,6 @@ export function Dashboard() {
                   )}
                 </div>
               </div>
-
-              <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl p-6 shadow-sm dark:shadow-none">
-                <h3 className="text-xl font-bold text-black dark:text-white mb-4">Quick Stats</h3>
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Active Signals</p>
-                    <p className="text-2xl font-bold text-black dark:text-white">0</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Total Trades</p>
-                    <p className="text-2xl font-bold text-black dark:text-white">0</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Win Rate</p>
-                    <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">0%</p>
-                  </div>
-                </div>
-              </div>
             </div>
           )}
 
@@ -174,15 +157,9 @@ export function Dashboard() {
                 <PerformanceMetrics userId={user.id} />
               </div>
 
-              <ActivePositions userId={user.id} />
+              {/* <LiveMT5Positions userId={user.id} /> */}
 
-              <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl p-6 shadow-sm dark:shadow-none">
-                <h3 className="text-xl font-bold text-black dark:text-white mb-4">Recent Activity</h3>
-                <div className="text-center py-12">
-                  <p className="text-slate-600 dark:text-slate-400">Trading activity will appear here</p>
-                  <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">Connect your EA to start receiving signals</p>
-                </div>
-              </div>
+              <RecentTradeActivity userId={user.id} />
             </>
           )}
         </div>
