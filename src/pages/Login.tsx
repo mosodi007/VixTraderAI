@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { TrendingUp } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
+import logoLight from '../assets/Vixai-logo.png';
+import logoDark from '../assets/Vixai-logo-dark.png';
 
 export function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -10,6 +12,7 @@ export function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
+  const { theme } = useTheme();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,10 +38,14 @@ export function Login() {
     <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-600 rounded-2xl mb-4">
-            <TrendingUp className="w-8 h-8 text-white" />
+          <div className="mb-4 flex items-center justify-center">
+            <img
+              src={theme === 'dark' ? logoDark : logoLight}
+              alt="VixAI"
+              className="h-16 w-16 rounded-2xl object-contain"
+            />
           </div>
-          <h1 className="text-3xl font-bold text-black dark:text-white mb-2">Deriv AI Trading</h1>
+          <h1 className="text-3xl font-bold text-black dark:text-white mb-2">VixAI Trader</h1>
           <p className="text-slate-600 dark:text-slate-400">AI-powered copy trading platform</p>
         </div>
 

@@ -374,6 +374,7 @@ void PushPositionsSnapshot()
 
     long ticket = (long)PositionGetInteger(POSITION_TICKET);
     string symbol = PositionGetString(POSITION_SYMBOL);
+    string comment = PositionGetString(POSITION_COMMENT);
     long type = (long)PositionGetInteger(POSITION_TYPE);
     string direction = (type==POSITION_TYPE_BUY ? "BUY" : "SELL");
     double volume = PositionGetDouble(POSITION_VOLUME);
@@ -389,6 +390,7 @@ void PushPositionsSnapshot()
     positionsJson += "{"
       "\"ticket\":\""+IntegerToString((int)ticket)+"\","
       "\"symbol\":\""+symbol+"\","
+      "\"comment\":\""+comment+"\","
       "\"direction\":\""+direction+"\","
       "\"volume\":"+DoubleToString(volume, 2)+","
       "\"price_open\":"+DoubleToString(price_open, 5)+","
@@ -401,9 +403,46 @@ void PushPositionsSnapshot()
   }
   positionsJson += "]";
 
+  // Also push recent closing deals (best-effort) so backend can reconcile closes even if OnTradeTransaction misses events.
+  datetime nowT = TimeCurrent();
+  datetime fromT = nowT - 3600; // last hour
+  string dealsJson = "[";
+  if(HistorySelect(fromT, nowT))
+  {
+    int dTotal = HistoryDealsTotal();
+    for(int di=0; di<dTotal; di++)
+    {
+      ulong dealTicket = HistoryDealGetTicket(di);
+      if(dealTicket == 0) continue;
+      if(!HistoryDealSelect(dealTicket)) continue;
+      long entry = (long)HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+      if(entry != DEAL_ENTRY_OUT) continue;
+      string dComment = HistoryDealGetString(dealTicket, DEAL_COMMENT);
+      if(StringFind(dComment, "VIX_AI:") != 0) continue;
+      string dSymbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+      double dProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+      double dPrice  = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+      datetime dTime = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+      long posId = (long)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID);
+
+      if(StringLen(dealsJson) > 1) dealsJson += ",";
+      dealsJson += "{"
+        "\"deal_ticket\":\""+IntegerToString((int)dealTicket)+"\","
+        "\"position_id\":\""+IntegerToString((int)posId)+"\","
+        "\"symbol\":\""+dSymbol+"\","
+        "\"comment\":\""+dComment+"\","
+        "\"profit\":"+DoubleToString(dProfit, 2)+","
+        "\"exit_price\":"+DoubleToString(dPrice, 5)+","
+        "\"closed_at\":\""+TimeToString(dTime, TIME_DATE|TIME_MINUTES|TIME_SECONDS)+"\""
+      "}";
+    }
+  }
+  dealsJson += "]";
+
   string body = "{"
     "\"mt5_login\":\""+login+"\","
-    "\"positions\":"+positionsJson+
+    "\"positions\":"+positionsJson+","
+    "\"deals\":"+dealsJson+
   "}";
 
   string resp; int st;

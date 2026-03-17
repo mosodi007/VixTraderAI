@@ -47,6 +47,7 @@ async function parseMt5Body(req: Request): Promise<Record<string, unknown>> {
 type Mt5Position = {
   ticket: string | number;
   symbol: string;
+  comment?: string;
   direction: string; // BUY/SELL
   volume: number;
   price_open: number;
@@ -56,6 +57,25 @@ type Mt5Position = {
   profit?: number | null;
   opened_at?: string | null; // ISO
 };
+
+type Mt5Deal = {
+  deal_ticket?: string;
+  position_id?: string;
+  symbol?: string;
+  comment?: string;
+  profit?: number | string;
+  exit_price?: number | string;
+  closed_at?: string;
+};
+
+function extractSignalIdFromComment(comment: string): string | null {
+  const c = (comment || "").trim();
+  if (!c.toUpperCase().startsWith("VIX_AI:")) return null;
+  const parts = c.split(":");
+  if (parts.length < 2) return null;
+  const id = parts.slice(1).join(":").trim();
+  return id.length > 10 ? id : null;
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
@@ -113,6 +133,15 @@ Deno.serve(async (req: Request) => {
       }
     }
     const positions = Array.isArray(positionsRaw) ? (positionsRaw as Mt5Position[]) : [];
+    let dealsRaw: unknown = (body as any).deals;
+    if (typeof dealsRaw === "string") {
+      try {
+        dealsRaw = JSON.parse(dealsRaw);
+      } catch {
+        dealsRaw = [];
+      }
+    }
+    const deals = Array.isArray(dealsRaw) ? (dealsRaw as Mt5Deal[]) : [];
 
     const nowIso = new Date().toISOString();
     const ticketList = positions
@@ -137,6 +166,8 @@ Deno.serve(async (req: Request) => {
       const symbol = String((p as any).symbol ?? "").trim();
       const direction = String((p as any).direction ?? "").trim().toUpperCase();
       if (!ticket || !symbol || (direction !== "BUY" && direction !== "SELL")) continue;
+      const comment = String((p as any).comment ?? "").trim();
+      const signalId = extractSignalIdFromComment(comment);
 
       const openedAt = (p as any).opened_at ? String((p as any).opened_at) : null;
 
@@ -160,6 +191,46 @@ Deno.serve(async (req: Request) => {
         onConflict: "mt5_login,ticket",
       });
       if (error) throw error;
+
+      // If comment contains signal_id, mark the corresponding trade as open with the correct ticket.
+      if (signalId) {
+        await supabase
+          .from("trades")
+          .update({ status: "open", ticket, symbol, direction })
+          .eq("mt5_login", mt5_login)
+          .eq("signal_id", signalId)
+          .in("status", ["sent", "open"]);
+      }
+    }
+
+    // Reconcile closing deals: update trades and close linked signals
+    for (const d of deals) {
+      const comment = String(d.comment ?? "").trim();
+      const signalId = extractSignalIdFromComment(comment);
+      if (!signalId) continue;
+      const exitPrice = toNumber(d.exit_price, null);
+      const profit = toNumber(d.profit, 0) ?? 0;
+      const closedAt = d.closed_at ? String(d.closed_at) : nowIso;
+
+      // update trade row
+      await supabase
+        .from("trades")
+        .update({
+          status: "closed",
+          exit_price: exitPrice,
+          profit_loss: profit,
+          closed_at: closedAt,
+        })
+        .eq("mt5_login", mt5_login)
+        .eq("signal_id", signalId);
+
+      // close signal row
+      await supabase.rpc("update_signal_outcome", {
+        p_signal_id: signalId,
+        p_outcome: profit >= 0 ? "TP1_HIT" : "SL_HIT",
+        p_close_price: exitPrice ?? 0,
+        p_profit_loss: profit,
+      });
     }
 
     // Mark account as synced too

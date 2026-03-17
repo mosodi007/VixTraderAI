@@ -21,8 +21,11 @@ export interface TechnicalIndicators {
   };
   sma20: number;
   sma50: number;
+  ema50: number;
   ema12: number;
   ema26: number;
+  ema200: number;
+  ema200_slope: number;
   bollingerBands: {
     upper: number;
     middle: number;
@@ -31,6 +34,16 @@ export interface TechnicalIndicators {
   atr: number;
   trend: 'bullish' | 'bearish' | 'neutral';
   volatility: 'high' | 'medium' | 'low';
+  /** Realized volatility (std dev of log returns) */
+  realized_vol: number;
+  /** Percentile of realized_vol vs recent distribution (0..1) */
+  realized_vol_percentile: number;
+  /** Trend direction from EMA50/EMA200 + slope */
+  trend_ema: 'bullish' | 'bearish' | 'neutral';
+  /** Market structure direction from recent swings */
+  trend_structure: 'bullish' | 'bearish' | 'neutral';
+  /** Strength of EMA trend: |ema50-ema200| / max(atr, eps) */
+  trend_strength: number;
 }
 
 export interface MarketAnalysis {
@@ -168,6 +181,76 @@ export class TechnicalAnalyzer {
     return this.calculateSMA(trueRanges, Math.min(period, trueRanges.length));
   }
 
+  private calculateLogReturns(prices: number[], window: number): number[] {
+    const n = Math.min(window, prices.length);
+    if (n < 3) return [];
+    const slice = prices.slice(-n);
+    const rets: number[] = [];
+    for (let i = 1; i < slice.length; i++) {
+      const prev = slice[i - 1];
+      const cur = slice[i];
+      if (prev > 0 && cur > 0) {
+        rets.push(Math.log(cur / prev));
+      }
+    }
+    return rets;
+  }
+
+  private std(values: number[]): number {
+    if (values.length < 2) return 0;
+    const mean = values.reduce((s, v) => s + v, 0) / values.length;
+    const variance = values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (values.length - 1);
+    return Math.sqrt(variance);
+  }
+
+  private realizedVol(prices: number[], window: number): number {
+    const rets = this.calculateLogReturns(prices, window);
+    return this.std(rets);
+  }
+
+  private realizedVolPercentile(prices: number[], window: number, lookback: number): { vol: number; pct: number } {
+    const volNow = this.realizedVol(prices, window);
+    const vols: number[] = [];
+    const step = Math.max(5, Math.floor(window / 5));
+    const maxStart = Math.max(0, prices.length - lookback);
+    for (let end = prices.length; end >= maxStart + window; end -= step) {
+      const sub = prices.slice(0, end);
+      vols.push(this.realizedVol(sub, window));
+      if (vols.length >= 60) break;
+    }
+    const valid = vols.filter((v) => Number.isFinite(v) && v > 0);
+    if (valid.length < 5 || volNow <= 0) return { vol: volNow, pct: 0.5 };
+    valid.sort((a, b) => a - b);
+    let count = 0;
+    for (const v of valid) if (v <= volNow) count++;
+    return { vol: volNow, pct: count / valid.length };
+  }
+
+  private detectStructureTrend(candles: Candle[]): 'bullish' | 'bearish' | 'neutral' {
+    if (candles.length < 20) return 'neutral';
+    const recent = candles.slice(-80);
+    const swingHighs: number[] = [];
+    const swingLows: number[] = [];
+    for (let i = 2; i < recent.length - 2; i++) {
+      const c = recent[i];
+      const p1 = recent[i - 1], p2 = recent[i - 2];
+      const n1 = recent[i + 1], n2 = recent[i + 2];
+      if (c.high > p1.high && c.high > p2.high && c.high > n1.high && c.high > n2.high) swingHighs.push(c.high);
+      if (c.low < p1.low && c.low < p2.low && c.low < n1.low && c.low < n2.low) swingLows.push(c.low);
+    }
+    const h = swingHighs.slice(-3);
+    const l = swingLows.slice(-3);
+    if (h.length >= 2 && l.length >= 2) {
+      const hh = h[h.length - 1] > h[h.length - 2];
+      const hl = l[l.length - 1] > l[l.length - 2];
+      const lh = h[h.length - 1] < h[h.length - 2];
+      const ll = l[l.length - 1] < l[l.length - 2];
+      if (hh && hl) return 'bullish';
+      if (lh && ll) return 'bearish';
+    }
+    return 'neutral';
+  }
+
   private ticksToCandles(ticks: TickData[], interval: number = 60): Candle[] {
     if (ticks.length === 0) return [];
 
@@ -257,8 +340,12 @@ export class TechnicalAnalyzer {
     const macd = this.calculateMACD(prices);
     const sma20 = this.calculateSMA(prices, 20);
     const sma50 = this.calculateSMA(prices, 50);
+    const ema50 = this.calculateEMA(prices, 50);
     const ema12 = this.calculateEMA(prices, 12);
     const ema26 = this.calculateEMA(prices, 26);
+    const ema200 = this.calculateEMA(prices, 200);
+    const ema200_prev = this.calculateEMA(prices.slice(0, Math.max(10, prices.length - 10)), 200);
+    const ema200_slope = ema200 - ema200_prev;
     const bollingerBands = this.calculateBollingerBands(prices, 20, 2);
     const atr = this.calculateATR(candles, 14);
 
@@ -282,17 +369,32 @@ export class TechnicalAnalyzer {
       volatility = 'low';
     }
 
+    const { vol: realized_vol, pct: realized_vol_percentile } = this.realizedVolPercentile(prices, 200, 800);
+    const trend_structure = this.detectStructureTrend(candles);
+    let trend_ema: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+    if (ema50 > ema200 && ema200_slope > 0) trend_ema = 'bullish';
+    else if (ema50 < ema200 && ema200_slope < 0) trend_ema = 'bearish';
+    const trend_strength = Math.abs(ema50 - ema200) / Math.max(atr, currentPrice * 0.0001, 1e-9);
+
     return {
       rsi,
       macd,
       sma20,
       sma50,
+      ema50,
       ema12,
       ema26,
+      ema200,
+      ema200_slope,
       bollingerBands,
       atr,
       trend,
       volatility,
+      realized_vol,
+      realized_vol_percentile,
+      trend_ema,
+      trend_structure,
+      trend_strength,
     };
   }
 

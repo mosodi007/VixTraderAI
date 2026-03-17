@@ -152,9 +152,9 @@ export function Dashboard() {
 
           {mt5Account?.verified && user && (
             <>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
                 <EAConnectionStatus userId={user.id} />
-                <PerformanceMetrics userId={user.id} />
+                {/* <PerformanceMetrics userId={user.id} /> */}
               </div>
 
               {/* <LiveMT5Positions userId={user.id} /> */}

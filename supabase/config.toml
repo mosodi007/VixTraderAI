@@ -12,3 +12,6 @@ verify_jwt = false
 
 [functions.mt5-report-positions]
 verify_jwt = false
+
+[functions.update-signal-filters]
+verify_jwt = false

@@ -48,6 +48,17 @@ Deno.serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Load adaptive filter thresholds (global)
+    const { data: filterCfg } = await supabase
+      .from("signal_filters_config")
+      .select("high_vol_percentile,strong_trend_strength,require_trend_alignment,require_structure_alignment")
+      .eq("id", "global")
+      .maybeSingle();
+    const highVolPercentile = Number(filterCfg?.high_vol_percentile ?? 0.7);
+    const strongTrendStrength = Number(filterCfg?.strong_trend_strength ?? 1.2);
+    const requireTrendAlignment = filterCfg?.require_trend_alignment ?? true;
+    const requireStructureAlignment = filterCfg?.require_structure_alignment ?? true;
+
     // Fetch per-symbol SL/TP points from symbol_sl_tp_config (Settings page)
     const { data: configRows } = await supabase.from('symbol_sl_tp_config').select('symbol, sl_points, tp_points');
     const pointsBySymbol: Record<string, { slPoints: number; tpPoints: number }> = {};
@@ -68,7 +79,7 @@ Deno.serve(async (req: Request) => {
     const timeframe = 'M1';
 
     const results: AutoSignalResult[] = [];
-    const generatedSignals = [];
+    const generatedSignals: any[] = [];
 
     console.log(`[AUTO-SCAN] Starting automated signal scan for ${symbols.length} symbols at ${new Date().toISOString()}`);
 
@@ -128,7 +139,14 @@ Deno.serve(async (req: Request) => {
         console.log(`[${symbol}] Current Price: ${ticks[ticks.length - 1].quote}`);
 
         const points = pointsBySymbol[symbol] ?? SYMBOL_SL_TP_POINTS[symbol] ?? { slPoints: 400, tpPoints: 800 };
-        const detector = createSignalDetector(ticks, { slPoints: points.slPoints, tpPoints: points.tpPoints });
+        const detector = createSignalDetector(ticks, {
+          slPoints: points.slPoints,
+          tpPoints: points.tpPoints,
+          highVolPercentile,
+          strongTrendStrength,
+          requireTrendAlignment,
+          requireStructureAlignment,
+        });
         const detection = detector.detectSignal(symbol, timeframe);
 
         console.log(`[${symbol}] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
@@ -138,6 +156,11 @@ Deno.serve(async (req: Request) => {
         console.log(`[${symbol}] Confidence: ${detection.confidence}%`);
         console.log(`[${symbol}] Triggers: ${detection.triggers.length}`);
         console.log(`[${symbol}] Risk-Reward: ${detection.riskRewardRatio}:1`);
+        if (detection.filters) {
+          console.log(
+            `[${symbol}] Filters: rv_pct=${detection.filters.realizedVolPercentile.toFixed(2)} (${detection.filters.volatilityRegime}), ema=${detection.filters.trendEma}, structure=${detection.filters.trendStructure}, strength=${detection.filters.trendStrength.toFixed(2)}, allowed=${detection.filters.allowed}, blocked=${detection.filters.blockedReasons.join('|')}`
+          );
+        }
 
         if (detection.triggers.length > 0) {
           console.log(`[${symbol}] 📈 INDICATOR TRIGGERS:`);
@@ -281,7 +304,7 @@ Deno.serve(async (req: Request) => {
               trigger_count: detection.triggers.length,
               market_context: marketContext,
               reasoning: marketContext,
-              technical_indicators: { triggers: detection.triggers, patterns: detection.patterns },
+              technical_indicators: { triggers: detection.triggers, patterns: detection.patterns, filters: detection.filters ?? null },
               expires_at: expiresAt.toISOString(),
               is_active: true,
               order_type: 'MARKET',

@@ -1,9 +1,11 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, History, Sun, Moon, Activity, Bell, BellRing } from 'lucide-react';
+import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, History, Sun, Moon, Bell, BellRing } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { playNewSignalAlert, unlockAudio } from '../lib/soundAlert';
+import logoLight from '../assets/Vixai-logo.png';
+import logoDark from '../assets/Vixai-logo-dark.png';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -56,13 +58,12 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
         `}>
           <div className="flex items-center justify-between p-6 border-b border-slate-300 dark:border-slate-700">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-emerald-600 rounded-lg flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-black dark:text-white font-bold">VixAI Trader</h1>
-                <p className="text-xs text-slate-600 dark:text-slate-400">Trading Platform</p>
-              </div>
+              <img
+                src={theme === 'dark' ? logoDark : logoLight}
+                alt="VixAI"
+                className="h-11 w-auto rounded-lg object-contain"
+              />
+              
             </div>
             <button
               onClick={() => setMobileMenuOpen(false)}

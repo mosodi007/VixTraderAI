@@ -32,6 +32,17 @@ export interface SignalDetectionResult {
   resistanceLevels?: number[];
   /** ATR for ICT refiner (when direction is set) */
   atr?: number;
+  /** Filter context for observability */
+  filters?: {
+    realizedVolPercentile: number;
+    realizedVol: number;
+    volatilityRegime: 'high' | 'medium' | 'low';
+    trendEma: 'bullish' | 'bearish' | 'neutral';
+    trendStructure: 'bullish' | 'bearish' | 'neutral';
+    trendStrength: number;
+    allowed: boolean;
+    blockedReasons: string[];
+  };
 }
 
 /** Config: use points (per-symbol) when set; otherwise ATR multipliers. */
@@ -40,6 +51,14 @@ export interface SignalDetectorConfig {
   tpPoints?: number;
   atrSlMultiplier?: number;
   atrTpMultiplier?: number;
+  /** Realized-vol percentile threshold for allowing signals */
+  highVolPercentile?: number;
+  /** Trend strength threshold above which fading the EMA trend is blocked */
+  strongTrendStrength?: number;
+  /** Require EMA direction alignment with signal direction */
+  requireTrendAlignment?: boolean;
+  /** Require structure direction alignment with signal direction */
+  requireStructureAlignment?: boolean;
 }
 
 export class AdvancedSignalDetector {
@@ -51,11 +70,19 @@ export class AdvancedSignalDetector {
   private atrTpMultiplier: number;
   private slPoints: number | null = null;
   private tpPoints: number | null = null;
+  private highVolPercentile: number;
+  private strongTrendStrength: number;
+  private requireTrendAlignment: boolean;
+  private requireStructureAlignment: boolean;
 
   constructor(ticks: TickData[], config?: SignalDetectorConfig) {
     this.analyzer = new TechnicalAnalyzer(ticks);
     this.atrSlMultiplier = config?.atrSlMultiplier ?? 2.5;
     this.atrTpMultiplier = config?.atrTpMultiplier ?? 4.5;
+    this.highVolPercentile = config?.highVolPercentile ?? 0.7;
+    this.strongTrendStrength = config?.strongTrendStrength ?? 1.2;
+    this.requireTrendAlignment = config?.requireTrendAlignment ?? true;
+    this.requireStructureAlignment = config?.requireStructureAlignment ?? true;
     if (config?.slPoints != null && config?.tpPoints != null && config.slPoints > 0 && config.tpPoints > 0) {
       this.slPoints = config.slPoints;
       this.tpPoints = config.tpPoints;
@@ -448,7 +475,17 @@ export class AdvancedSignalDetector {
           entryPrice: currentPrice,
           stopLoss: 0,
           takeProfit: 0,
-          reasoning: 'Not enough data for analysis - wait for the next round...'
+          reasoning: 'Not enough data for analysis - wait for the next round...',
+          filters: {
+            realizedVolPercentile: indicators.realized_vol_percentile ?? 0.5,
+            realizedVol: indicators.realized_vol ?? 0,
+            volatilityRegime: (indicators.realized_vol_percentile ?? 0.5) >= 0.7 ? 'high' : (indicators.realized_vol_percentile ?? 0.5) >= 0.45 ? 'medium' : 'low',
+            trendEma: indicators.trend_ema ?? 'neutral',
+            trendStructure: indicators.trend_structure ?? 'neutral',
+            trendStrength: indicators.trend_strength ?? 0,
+            allowed: false,
+            blockedReasons: ['no_direction'],
+          },
         };
       }
 
@@ -467,14 +504,39 @@ export class AdvancedSignalDetector {
       const totalPossibleSignals = 5; // RSI, MACD, EMA, Trend, Patterns
       const confidence = Math.min(Math.round((maxSignals / totalPossibleSignals) * 100), 99);
 
-      // Check quality thresholds
-      const shouldGenerateSignal =
+      // Filters: only trade on high activity + aligned trend (EMA + structure)
+      const blockedReasons: string[] = [];
+      const rvPct = indicators.realized_vol_percentile ?? 0.5;
+      const volatilityRegime: 'high' | 'medium' | 'low' = rvPct >= this.highVolPercentile ? 'high' : rvPct >= Math.max(0.1, this.highVolPercentile - 0.25) ? 'medium' : 'low';
+      if (volatilityRegime !== 'high') blockedReasons.push('low_activity');
+
+      const emaTrend = indicators.trend_ema ?? 'neutral';
+      const structTrend = indicators.trend_structure ?? 'neutral';
+      const emaAligned = (direction === 'BUY' && emaTrend === 'bullish') || (direction === 'SELL' && emaTrend === 'bearish');
+      const structAligned = (direction === 'BUY' && structTrend === 'bullish') || (direction === 'SELL' && structTrend === 'bearish');
+      if (this.requireTrendAlignment && !emaAligned) blockedReasons.push('counter_trend_ema');
+      if (this.requireStructureAlignment && !structAligned) blockedReasons.push('counter_trend_structure');
+
+      // Strong-trend guard: if strength is high, forbid fading EMA direction
+      const strength = indicators.trend_strength ?? 0;
+      const strongTrend = strength >= this.strongTrendStrength;
+      if (strongTrend) {
+        if (direction === 'BUY' && emaTrend === 'bearish') blockedReasons.push('strong_trend_fade');
+        if (direction === 'SELL' && emaTrend === 'bullish') blockedReasons.push('strong_trend_fade');
+      }
+
+      // Check quality thresholds + filters
+      const baseQuality =
         triggers.length >= this.minTriggers &&
         confidence >= this.minConfidence &&
         slTp.rr >= this.minRiskReward;
+      const shouldGenerateSignal = baseQuality && blockedReasons.length === 0;
 
       // Generate reasoning
-      const reasoning = this.generateReasoning(direction, triggers, patterns, indicators, confidence, slTp.rr);
+      const reasoningCore = this.generateReasoning(direction, triggers, patterns, indicators, confidence, slTp.rr);
+      const reasoning = blockedReasons.length > 0
+        ? `${reasoningCore}\n\n[Filters] Blocked: ${blockedReasons.join(', ')} (rv_pct=${rvPct.toFixed(2)}, ema=${emaTrend}, structure=${structTrend}, strength=${strength.toFixed(2)})`
+        : `${reasoningCore}\n\n[Filters] Allowed (rv_pct=${rvPct.toFixed(2)}, ema=${emaTrend}, structure=${structTrend}, strength=${strength.toFixed(2)})`;
 
       return {
         shouldGenerateSignal,
@@ -491,6 +553,16 @@ export class AdvancedSignalDetector {
         supportLevels: analysis.supportLevels,
         resistanceLevels: analysis.resistanceLevels,
         atr: indicators.atr,
+        filters: {
+          realizedVolPercentile: rvPct,
+          realizedVol: indicators.realized_vol ?? 0,
+          volatilityRegime,
+          trendEma: emaTrend,
+          trendStructure: structTrend,
+          trendStrength: strength,
+          allowed: shouldGenerateSignal,
+          blockedReasons,
+        },
       };
     } catch (error) {
       return {

@@ -16,6 +16,7 @@ export const SYMBOL_POINT_SIZE: Record<string, number> = {
   stpRNG: 0.01,
   '1HZ10V': 0.01,
   '1HZ30V': 0.01,
+  '1HZ75V': 0.01,
   '1HZ50V': 0.01,
   '1HZ90V': 0.01,
   '1HZ100V': 0.01,
@@ -35,7 +36,8 @@ export const SYMBOL_SL_TP_POINTS: Record<string, { slPoints: number; tpPoints: n
   R_100: { slPoints: 400, tpPoints: 800 },
   stpRNG: { slPoints: 40, tpPoints: 80 },
   '1HZ10V': { slPoints: 400, tpPoints: 800 },
-  '1HZ30V': { slPoints: 20000, tpPoints: 40000 },
+  '1HZ30V': { slPoints: 20000, tpPoints: 60000 }, // 1:3 RR
+  '1HZ75V': { slPoints: 20000, tpPoints: 60000 }, // 1:3 RR
   '1HZ50V': { slPoints: 200000, tpPoints: 400000 },
   '1HZ90V': { slPoints: 100000, tpPoints: 200000 },
   '1HZ100V': { slPoints: 2000, tpPoints: 4000 },

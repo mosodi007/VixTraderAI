@@ -240,7 +240,7 @@ Deno.serve(async (req: Request) => {
         stop_loss: sl,
         take_profit: tpVal,
         magic: 123456,
-        comment: "VIX_AI",
+        comment: `VIX_AI:${id}`,
       });
       if (instructions.length >= max) break;
     }
