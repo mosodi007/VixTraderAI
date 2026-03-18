@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import logoLight from '../assets/Vixai-logo.png';
@@ -13,6 +13,17 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
   const { theme } = useTheme();
+
+  useEffect(() => {
+    const applyHashMode = () => {
+      const hash = window.location.hash.slice(1);
+      if (hash === 'signup') setIsSignUp(true);
+      if (hash === 'login') setIsSignUp(false);
+    };
+    applyHashMode();
+    window.addEventListener('hashchange', applyHashMode);
+    return () => window.removeEventListener('hashchange', applyHashMode);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

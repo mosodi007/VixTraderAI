@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { ArrowUpRight, ArrowDownRight, Clock } from 'lucide-react';
+import type { TradingMode } from '../contexts/AuthContext';
 
 interface TradeRow {
   id: string;
@@ -18,17 +19,39 @@ interface TradeRow {
 
 interface RecentTradeActivityProps {
   userId: string;
+  tradingMode: TradingMode;
 }
 
-export function RecentTradeActivity({ userId }: RecentTradeActivityProps) {
+export function RecentTradeActivity({ userId, tradingMode }: RecentTradeActivityProps) {
   const [rows, setRows] = useState<TradeRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const loadModeLogins = async (): Promise<string[]> => {
+    const { data } = await supabase
+      .from('mt5_accounts')
+      .select('mt5_login,account_type')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+    const list = (data as any[]) || [];
+    const logins = list
+      .filter((r) => (tradingMode === 'demo' ? r?.account_type === 'demo' : r?.account_type === 'real' || r?.account_type === 'live'))
+      .map((r) => String(r.mt5_login || '').trim())
+      .filter(Boolean);
+    return logins;
+  };
+
   const load = async () => {
+    const logins = await loadModeLogins();
+    if (logins.length === 0) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
     const { data } = await supabase
       .from('trades')
       .select('id,mt5_login,symbol,direction,lot_size,entry_price,exit_price,profit_loss,status,opened_at,closed_at')
       .eq('user_id', userId)
+      .in('mt5_login', logins)
       .order('opened_at', { ascending: false })
       .limit(20);
     setRows((data as any) || []);
@@ -41,8 +64,10 @@ export function RecentTradeActivity({ userId }: RecentTradeActivityProps) {
       .channel('recent_trade_activity')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'trades', filter: `user_id=eq.${userId}` }, () => load())
       .subscribe();
-    return () => channel.unsubscribe();
-  }, [userId]);
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [userId, tradingMode]);
 
   if (loading) {
     return (

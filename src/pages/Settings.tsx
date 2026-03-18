@@ -74,6 +74,16 @@ function isMt5AccountApproved(a: { verified?: boolean; verification_status?: str
   return s === 'verified' || s === 'approved';
 }
 
+function formatMt5SaveError(err: { code?: string; message?: string } | null | undefined): string {
+  if (!err) return 'Something went wrong';
+  if (err.code === '23505') return 'MT5 login already exists';
+  const msg = String(err.message || '');
+  if (/duplicate key|unique constraint/i.test(msg) && /mt5_login/i.test(msg)) {
+    return 'MT5 login already exists';
+  }
+  return msg || 'Something went wrong';
+}
+
 export function Settings() {
   const { user, tradingMode } = useAuth();
   const [demoAccount, setDemoAccount] = useState<any>(null);
@@ -104,10 +114,15 @@ export function Settings() {
   const [tradeSettingsLoading, setTradeSettingsLoading] = useState(false);
   const [tradeSettingsMessage, setTradeSettingsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const [minAiConfidencePercent, setMinAiConfidencePercent] = useState<number>(50);
+  const [minAiConfidenceLoading, setMinAiConfidenceLoading] = useState(false);
+  const [minAiConfidenceMessage, setMinAiConfidenceMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   useEffect(() => {
     loadDemoAndLiveAccounts();
     loadMt5Accounts();
     loadSymbolPoints();
+    loadMinAiConfidence();
   }, [user]);
 
   useEffect(() => {
@@ -124,9 +139,27 @@ export function Settings() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: true });
     const rows = all || [];
-    const d = rows.find((r: any) => r.account_type === 'demo') ?? null;
+    let d = rows.find((r: any) => r.account_type === 'demo') ?? null;
     const l =
       rows.find((r: any) => r.account_type === 'real' || r.account_type === 'live') ?? null;
+
+    // Demo accounts are auto-approved (no manual verification required)
+    if (d && !isMt5AccountApproved(d)) {
+      const nowIso = new Date().toISOString();
+      const { data: updated } = await supabase
+        .from('mt5_accounts')
+        .update({
+          verification_status: 'verified',
+          verified: true,
+          verified_at: nowIso,
+          rejected_reason: null,
+        })
+        .eq('id', d.id)
+        .select('*')
+        .maybeSingle();
+      if (updated) d = updated as any;
+    }
+
     setDemoAccount(d);
     setLiveAccount(l);
     setDemoLogin(d?.mt5_login ?? '');
@@ -143,6 +176,18 @@ export function Settings() {
       .order('created_at', { ascending: true });
 
     setMt5Accounts(data || []);
+  };
+
+  const loadMinAiConfidence = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('ai_min_confidence_percent')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (error) return;
+    const v = Number((data as any)?.ai_min_confidence_percent);
+    if (Number.isFinite(v)) setMinAiConfidencePercent(Math.max(0, Math.min(100, Math.round(v))));
   };
 
   const accountsForMode = mt5Accounts.filter((a) =>
@@ -309,12 +354,34 @@ export function Settings() {
         if (error) throw error;
       }
 
-      setTradeSettingsMessage({ type: 'success', text: 'Per-symbol trading settings saved.' });
+      setTradeSettingsMessage({ type: 'success', text: 'Trading lots settings saved.' });
     } catch (error: any) {
-      setTradeSettingsMessage({ type: 'error', text: error.message || 'Failed to save per-symbol trading settings' });
+      setTradeSettingsMessage({ type: 'error', text: error.message || 'Failed to save trading lots settings' });
     } finally {
       setTradeSettingsLoading(false);
     }
+  };
+
+  const handleSaveMinAiConfidence = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      setMinAiConfidenceMessage({ type: 'error', text: 'Not authenticated' });
+      return;
+    }
+    const next = Math.max(0, Math.min(100, Math.round(Number(minAiConfidencePercent) || 0)));
+    setMinAiConfidenceLoading(true);
+    setMinAiConfidenceMessage(null);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ ai_min_confidence_percent: next })
+      .eq('id', user.id);
+    if (error) {
+      setMinAiConfidenceMessage({ type: 'error', text: error.message || 'Failed to save setting' });
+    } else {
+      setMinAiConfidencePercent(next);
+      setMinAiConfidenceMessage({ type: 'success', text: 'Minimum AI confidence saved.' });
+    }
+    setMinAiConfidenceLoading(false);
   };
 
   const ensureProfile = async () => {
@@ -334,6 +401,7 @@ export function Settings() {
     setDemoMessage(null);
     try {
       await ensureProfile();
+      const nowIso = new Date().toISOString();
       if (demoAccount) {
         if (isMt5AccountApproved(demoAccount)) {
           setDemoMessage({ type: 'error', text: 'Approved demo account cannot be changed here. Contact support if needed.' });
@@ -345,28 +413,38 @@ export function Settings() {
             mt5_login: demoLogin.trim(),
             server: 'Deriv-Demo',
             account_type: 'demo',
-            verification_status: 'pending',
-            verified: false,
-            verified_at: null,
+            verification_status: 'verified',
+            verified: true,
+            verified_at: nowIso,
             rejected_reason: null,
           })
           .eq('id', demoAccount.id);
-        if (error) throw error;
-        setDemoMessage({ type: 'success', text: 'Demo MT5 account updated.' });
+        if (error) {
+          setDemoMessage({ type: 'error', text: formatMt5SaveError(error) });
+          return;
+        }
+        setDemoMessage({ type: 'success', text: 'Demo MT5 connected.' });
       } else {
         const { error } = await supabase.from('mt5_accounts').insert({
           user_id: user.id,
           mt5_login: demoLogin.trim(),
           server: 'Deriv-Demo',
           account_type: 'demo',
+          verification_status: 'verified',
+          verified: true,
+          verified_at: nowIso,
+          rejected_reason: null,
         });
-        if (error) throw error;
-        setDemoMessage({ type: 'success', text: 'Demo MT5 login submitted.' });
+        if (error) {
+          setDemoMessage({ type: 'error', text: formatMt5SaveError(error) });
+          return;
+        }
+        setDemoMessage({ type: 'success', text: 'Demo MT5 connected.' });
       }
       await loadDemoAndLiveAccounts();
       await loadMt5Accounts();
     } catch (err: any) {
-      setDemoMessage({ type: 'error', text: err.message || 'Failed to save demo account' });
+      setDemoMessage({ type: 'error', text: formatMt5SaveError(err) || err.message || 'Failed to save demo account' });
     } finally {
       setDemoLoading(false);
     }
@@ -397,7 +475,10 @@ export function Settings() {
             rejected_reason: null,
           })
           .eq('id', liveAccount.id);
-        if (error) throw error;
+        if (error) {
+          setLiveMessage({ type: 'error', text: formatMt5SaveError(error) });
+          return;
+        }
         setLiveMessage({ type: 'success', text: 'Live MT5 account updated.' });
       } else {
         const { error } = await supabase.from('mt5_accounts').insert({
@@ -406,13 +487,16 @@ export function Settings() {
           server,
           account_type: 'real',
         });
-        if (error) throw error;
+        if (error) {
+          setLiveMessage({ type: 'error', text: formatMt5SaveError(error) });
+          return;
+        }
         setLiveMessage({ type: 'success', text: 'Live MT5 login submitted for verification.' });
       }
       await loadDemoAndLiveAccounts();
       await loadMt5Accounts();
     } catch (err: any) {
-      setLiveMessage({ type: 'error', text: err.message || 'Failed to save live account' });
+      setLiveMessage({ type: 'error', text: formatMt5SaveError(err) || err.message || 'Failed to save live account' });
     } finally {
       setLiveLoading(false);
     }
@@ -687,7 +771,78 @@ export function Settings() {
           </div> */}
 
           <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Per-Symbol Trading Settings</h3>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Trade filters</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
+              This controls the minimum AI confidence the EA will trade.
+            </p>
+
+            {minAiConfidenceMessage && (
+              <div className={`flex items-center gap-3 p-4 rounded-lg mb-6 ${
+                minAiConfidenceMessage.type === 'success'
+                  ? 'bg-emerald-500/10 border border-emerald-500/30'
+                  : 'bg-red-500/10 border border-red-500/30'
+              }`}>
+                {minAiConfidenceMessage.type === 'success' ? (
+                  <CheckCircle className="w-5 h-5 text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-red-400" />
+                )}
+                <p className={`text-sm ${minAiConfidenceMessage.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {minAiConfidenceMessage.text}
+                </p>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveMinAiConfidence} className="space-y-4">
+              <div className="flex items-end gap-4 flex-wrap">
+                <div className="flex-1 min-w-[260px]">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                    Minimum AI confidence level to trade
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={minAiConfidencePercent}
+                    onChange={(e) => setMinAiConfidencePercent(Number(e.target.value) || 0)}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    <span>0%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                    Value (%)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={minAiConfidencePercent}
+                    onChange={(e) => setMinAiConfidencePercent(Number(e.target.value) || 0)}
+                    className="w-28 px-4 py-3 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={minAiConfidenceLoading}
+                className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+              >
+                <Save className="w-5 h-5" />
+                {minAiConfidenceLoading ? 'Saving...' : 'Save'}
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Trading Lots Settings</h3>
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
               Enable/disable trading per symbol and set lot sizing. Percent mode uses: <span className="font-mono">lot = (balance × percent/100) / 1000</span>.
             </p>
@@ -851,6 +1006,12 @@ export function Settings() {
                           {String(demoAccount.verification_status || 'pending')}
                         </span>
                       </div>
+                      {!isMt5AccountApproved(demoAccount) &&
+                        demoAccount.verification_status !== 'rejected' && (
+                          <p className="text-xs text-slate-600 dark:text-slate-400 pt-3 mt-2 border-t border-slate-200 dark:border-slate-600 leading-relaxed">
+                            We are reviewing your account, we will notify you via email when we are done.
+                          </p>
+                        )}
                     </div>
                   </div>
                 )}
@@ -881,6 +1042,12 @@ export function Settings() {
                           {liveAccount.rejected_reason}
                         </p>
                       )}
+                      {!isMt5AccountApproved(liveAccount) &&
+                        liveAccount.verification_status !== 'rejected' && (
+                          <p className="text-xs text-slate-600 dark:text-slate-400 pt-3 mt-2 border-t border-slate-200 dark:border-slate-600 leading-relaxed">
+                            We are reviewing your account, we will notify you via email when we are done.
+                          </p>
+                        )}
                     </div>
                   </div>
                 )}

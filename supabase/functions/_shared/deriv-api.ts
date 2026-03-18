@@ -80,7 +80,7 @@ export class DerivAPI {
 
   constructor(config: DerivAPIConfig) {
     this.config = config;
-    const appId = config.appId || "1089";
+    const appId = config.appId || "89937";
     this.wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${appId}`;
   }
 

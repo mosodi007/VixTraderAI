@@ -19,6 +19,12 @@ function toNumber(v: unknown, fallback: number | null = null): number | null {
   return Number.isFinite(n) ? n : fallback;
 }
 
+type EaMode = "demo" | "live";
+function toEaMode(v: unknown): EaMode {
+  const s = String(v || "").toLowerCase().trim();
+  return s === "live" ? "live" : "demo";
+}
+
 function parseBodyUrlEncoded(cleaned: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const part of cleaned.split("&")) {
@@ -67,6 +73,7 @@ Deno.serve(async (req: Request) => {
 
     const body = await parseMt5Body(req);
     const mt5_login = String(body.mt5_login || "").trim();
+    const ea_mode = toEaMode((body as any).ea_mode);
     if (!mt5_login) {
       return new Response(
         JSON.stringify({
@@ -80,13 +87,33 @@ Deno.serve(async (req: Request) => {
 
     const { data: acct } = await supabase
       .from("mt5_accounts")
-      .select("user_id, mt5_login")
+      .select("user_id, mt5_login, account_type, verified, verification_status")
       .eq("mt5_login", mt5_login)
       .maybeSingle();
 
     if (!acct?.user_id) {
+      // Demo mode: allow unregistered demo accounts; treat as no-op success.
+      if (ea_mode === "demo") {
+        return new Response(JSON.stringify({ success: true, demo_unregistered: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       return new Response(JSON.stringify({ success: false, error: "MT5 account not found" }), {
         status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const t = String((acct as any).account_type || "").toLowerCase();
+    const typeOk = ea_mode === "demo" ? t === "demo" : t === "real" || t === "live";
+    const isApproved =
+      typeOk &&
+      ((acct as any).verified === true ||
+        ["verified", "approved"].includes(String((acct as any).verification_status || "").toLowerCase()));
+    // Demo mode: don't require approval, only that type matches if row exists.
+    if (ea_mode === "live" && !isApproved) {
+      return new Response(JSON.stringify({ success: false, error: "Unauthorized" }), {
+        status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }

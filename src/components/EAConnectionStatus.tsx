@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Activity, Wifi, WifiOff, Clock, RefreshCw, AlertTriangle, Power } from 'lucide-react';
+import { Activity, Wifi, WifiOff, Clock, RefreshCw, AlertTriangle, Power, Download } from 'lucide-react';
+import type { TradingMode } from '../contexts/AuthContext';
 
 interface EAConnection {
   id: string;
@@ -14,9 +15,10 @@ interface EAConnection {
 
 interface EAConnectionStatusProps {
   userId: string;
+  tradingMode: TradingMode;
 }
 
-export function EAConnectionStatus({ userId }: EAConnectionStatusProps) {
+export function EAConnectionStatus({ userId, tradingMode }: EAConnectionStatusProps) {
   const [connections, setConnections] = useState<EAConnection[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -43,13 +45,35 @@ export function EAConnectionStatus({ userId }: EAConnectionStatusProps) {
       subscription.unsubscribe();
       clearInterval(interval);
     };
-  }, [userId]);
+  }, [userId, tradingMode]);
+
+  const loadModeLogins = async (): Promise<string[]> => {
+    const { data } = await supabase
+      .from('mt5_accounts')
+      .select('mt5_login,account_type')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+    const rows = (data as any[]) || [];
+    const logins = rows
+      .filter((r) => (tradingMode === 'demo' ? r?.account_type === 'demo' : r?.account_type === 'real' || r?.account_type === 'live'))
+      .map((r) => String(r.mt5_login || '').trim())
+      .filter(Boolean);
+    return logins;
+  };
 
   const loadConnections = async () => {
+    const logins = await loadModeLogins();
+    if (logins.length === 0) {
+      setConnections([]);
+      setLoading(false);
+      return;
+    }
+
     const { data } = await supabase
       .from('ea_connections')
       .select('*')
       .eq('user_id', userId)
+      .in('mt5_login', logins)
       .order('updated_at', { ascending: false });
 
     setConnections(data || []);
@@ -130,10 +154,37 @@ export function EAConnectionStatus({ userId }: EAConnectionStatusProps) {
           <p className="text-sm text-slate-600 dark:text-slate-400">
             No Expert Advisors are currently connected. Install and run the EA on your MT5 platform to begin.
           </p>
+          <div className="mt-5 pt-5 border-t border-slate-200 dark:border-slate-700">
+            <p className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Download EA</p>
+            {tradingMode === 'demo' ? (
+              <a
+                href="/VixAi-Trader-Demo.mq5"
+                download
+                className="inline-flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-medium rounded-lg transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Download Demo EA
+              </a>
+            ) : (
+              <a
+                href="/VixAi-Trader-Live.mq5"
+                download
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Download Live EA
+              </a>
+            )}
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-3">
+              Save this file into <span className="font-mono">MQL5/Experts</span>, then restart MT5 and attach the EA to a chart.
+            </p>
+          </div>
         </div>
       </div>
     );
   }
+
+  const anyOnline = connections.some((c) => getConnectionHealth(c).status === 'online');
 
   return (
     <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl p-6">
@@ -155,6 +206,38 @@ export function EAConnectionStatus({ userId }: EAConnectionStatusProps) {
           <RefreshCw className="w-4 h-4 text-slate-600 dark:text-slate-400" />
         </button>
       </div>
+
+      {!anyOnline && (
+        <div className="mb-4 bg-white dark:bg-slate-900/50 rounded-lg p-4 border border-slate-300 dark:border-slate-700">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">EA not connected</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                Download and install the EA, then attach it to a chart to start heartbeats.
+              </p>
+            </div>
+            {tradingMode === 'demo' ? (
+              <a
+                href="/VixAi-Trader-Demo.mq5"
+                download
+                className="inline-flex items-center gap-2 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Demo EA
+              </a>
+            ) : (
+              <a
+                href="/VixAi-Trader-Live.mq5"
+                download
+                className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Live EA
+              </a>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="space-y-3">
         {connections.map((connection) => {

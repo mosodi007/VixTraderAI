@@ -82,7 +82,7 @@ Deno.serve(async (req: Request) => {
 
     // List of symbols to monitor
     // Removed: R_10, R_50, 1HZ50V, 1HZ90V, JD25
-    const symbols = ['1HZ10V','1HZ30V','1HZ75V','1HZ100V'];
+    const symbols = ['1HZ30V','1HZ75V','1HZ100V'];
     const timeframe = 'M1';
 
     const results: AutoSignalResult[] = [];
@@ -221,19 +221,19 @@ Deno.serve(async (req: Request) => {
           );
           if (!confOk) {
             console.log(
-              `[${symbol}] No confirmation candle yet (${confIntervalSec}s bar): ${confDetail}`,
+              `[${symbol}] No engulfing confirmation (${confIntervalSec}s bars): ${confDetail}`,
             );
             return {
               symbol,
               signalGenerated: false,
               reason:
-                `Awaiting confirmation: last closed ${confIntervalSec}s candle must be ` +
-                `${detection.direction === "BUY" ? "bullish (close > open)" : "bearish (close < open)"} with meaningful body. (${confDetail})`,
+                `Awaiting ${detection.direction === "BUY" ? "bullish" : "bearish"} engulfing: last closed ` +
+                `${confIntervalSec}s bar must engulf the prior bar's body. (${confDetail})`,
               confidence: detection.confidence,
               direction: detection.direction,
             };
           }
-          console.log(`[${symbol}] Confirmation candle OK: ${confDetail}`);
+          console.log(`[${symbol}] Engulfing confirmation OK: ${confDetail}`);
         }
 
         // Manipulation phase high/low (recent range before the move; used for SL placement)
@@ -304,7 +304,7 @@ Deno.serve(async (req: Request) => {
         }
 
         // Enforce minimum SL distance (enough room): min_sl_distance = max(2*ATR, pointSize*30)
-        const minSlDistance = Math.max(atr * 3, pointSize * 80);
+        const minSlDistance = Math.max(atr * 6, pointSize * 80);
         const slDistance = Math.abs(entryPrice - stopLoss);
         if (slDistance < minSlDistance) {
           if (detection.direction === 'BUY') {

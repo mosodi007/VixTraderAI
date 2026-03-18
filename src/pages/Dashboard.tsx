@@ -161,6 +161,14 @@ export function Dashboard() {
                       </p>
                     </div>
                   )}
+                  {!mt5Account.verified &&
+                    mt5Account.verification_status !== 'rejected' && (
+                      <div className="bg-sky-50 dark:bg-sky-500/10 border border-sky-200 dark:border-sky-500/25 rounded-lg p-4">
+                        <p className="text-sm text-sky-800 dark:text-sky-200 leading-relaxed">
+                          We are reviewing your account, we will notify you via email when we are done.
+                        </p>
+                      </div>
+                    )}
                 </div>
               </div>
             </div>
@@ -169,13 +177,13 @@ export function Dashboard() {
           {mt5Account?.verified && user && (
             <>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <EAConnectionStatus userId={user.id} />
-                <PerformanceMetrics userId={user.id} />
+                <EAConnectionStatus userId={user.id} tradingMode={tradingMode} />
+                <PerformanceMetrics userId={user.id} tradingMode={tradingMode} />
               </div>
 
               {/* <LiveMT5Positions userId={user.id} /> */}
 
-              <RecentTradeActivity userId={user.id} />
+              <RecentTradeActivity userId={user.id} tradingMode={tradingMode} />
             </>
           )}
         </div>

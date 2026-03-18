@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { TrendingUp, TrendingDown, DollarSign, Activity, Target, Award } from 'lucide-react';
+import type { TradingMode } from '../contexts/AuthContext';
 
 interface Trade {
   id: string;
@@ -12,9 +13,10 @@ interface Trade {
 
 interface PerformanceMetricsProps {
   userId: string;
+  tradingMode: TradingMode;
 }
 
-export function PerformanceMetrics({ userId }: PerformanceMetricsProps) {
+export function PerformanceMetrics({ userId, tradingMode }: PerformanceMetricsProps) {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -36,13 +38,34 @@ export function PerformanceMetrics({ userId }: PerformanceMetricsProps) {
     return () => {
       subscription.unsubscribe();
     };
-  }, [userId]);
+  }, [userId, tradingMode]);
+
+  const loadModeLogins = async (): Promise<string[]> => {
+    const { data } = await supabase
+      .from('mt5_accounts')
+      .select('mt5_login,account_type')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+    const rows = (data as any[]) || [];
+    const logins = rows
+      .filter((r) => (tradingMode === 'demo' ? r?.account_type === 'demo' : r?.account_type === 'real' || r?.account_type === 'live'))
+      .map((r) => String(r.mt5_login || '').trim())
+      .filter(Boolean);
+    return logins;
+  };
 
   const loadTrades = async () => {
+    const logins = await loadModeLogins();
+    if (logins.length === 0) {
+      setTrades([]);
+      setLoading(false);
+      return;
+    }
     const { data } = await supabase
       .from('trades')
       .select('id, profit_loss, status, opened_at, closed_at')
       .eq('user_id', userId)
+      .in('mt5_login', logins)
       .order('opened_at', { ascending: false });
 
     setTrades(data || []);

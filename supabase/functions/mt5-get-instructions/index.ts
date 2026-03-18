@@ -56,6 +56,26 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+type EaMode = "demo" | "live";
+
+function toEaMode(v: unknown): EaMode {
+  const s = String(v || "").toLowerCase().trim();
+  return s === "live" ? "live" : "demo";
+}
+
+function isApprovedAccountForMode(
+  a: { account_type?: string; verified?: boolean; verification_status?: string } | null,
+  mode: EaMode,
+): boolean {
+  if (!a) return false;
+  const type = String((a as any).account_type || "").toLowerCase();
+  const isTypeOk = mode === "demo" ? type === "demo" : type === "real" || type === "live";
+  if (!isTypeOk) return false;
+  if ((a as any).verified === true) return true;
+  const s = String((a as any).verification_status || "").toLowerCase();
+  return s === "verified" || s === "approved";
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -118,6 +138,7 @@ Deno.serve(async (req: Request) => {
     const mt5_loginRaw = body.mt5_login;
     const mt5_login = String(mt5_loginRaw != null ? mt5_loginRaw : "").trim();
     const max = Math.max(1, Math.min(20, Number(body.max) || 5));
+    const ea_mode = toEaMode((body as any).ea_mode);
 
     if (!mt5_login) {
       return new Response(
@@ -135,30 +156,102 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Find the account owner (user_id); try exact mt5_login and normalized (no leading zeros)
+    // Find the account owner (user_id) if registered; try exact mt5_login and normalized (no leading zeros)
     const loginNorm = mt5_login.replace(/^0+/, "") || mt5_login;
     const { data: acctExact } = await supabase
       .from("mt5_accounts")
-      .select("user_id, verified, mt5_login")
+      .select("user_id, verified, verification_status, account_type, mt5_login")
       .eq("mt5_login", mt5_login)
       .maybeSingle();
     const acct = acctExact ?? (
       loginNorm !== mt5_login
         ? (await supabase
           .from("mt5_accounts")
-          .select("user_id, verified, mt5_login")
+          .select("user_id, verified, verification_status, account_type, mt5_login")
           .eq("mt5_login", loginNorm)
           .maybeSingle()).data
         : null
     );
 
     if (!acct || !acct.user_id) {
+      // Demo mode: allow unregistered demo accounts to run without any DB auth.
+      if (ea_mode === "demo") {
+        const { data: signals, error: sigErr } = await supabase
+          .from("signals")
+          .select("id, symbol, mt5_symbol, direction, entry_price, stop_loss, take_profit, tp1, created_at, is_active, signal_status")
+          .eq("is_active", true)
+          .eq("signal_status", "ACTIVE")
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (sigErr) throw sigErr;
+
+        const sigList = signals || [];
+        const instructions: any[] = [];
+        for (const s of sigList) {
+          if (!s.symbol || !s.direction) continue;
+          const symbolCode = String(s.symbol || "").trim();
+          const tp = (s as any).tp1 ?? (s as any).take_profit;
+          const sl = Number((s as any).stop_loss);
+          const tpVal = Number(tp);
+          if (!Number.isFinite(sl) || !Number.isFinite(tpVal) || sl <= 0 || tpVal <= 0) continue;
+
+          const rawSymbol = symbolCode;
+          const symbolForEA =
+            ((s as any).mt5_symbol && String((s as any).mt5_symbol).trim()) ||
+            DERIV_TO_MT5_SYMBOL[rawSymbol] ||
+            rawSymbol;
+
+          instructions.push({
+            signal_id: String((s as any).id),
+            symbol: symbolForEA,
+            symbol_code: rawSymbol,
+            direction: (s as any).direction,
+            entry_type: "market",
+            entry_price: Number((s as any).entry_price) || 0,
+            stop_loss: sl,
+            take_profit: tpVal,
+            lot_mode: "fixed",
+            fixed_lot: 0.01,
+            percent: 0,
+            percent_formula: "lots_per_1000",
+            magic: 123456,
+            comment: `VIX_AI:${String((s as any).id)}`,
+          });
+          if (instructions.length >= max) break;
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            instructions,
+            demo_unregistered: true,
+            debug: {
+              active_signals_count: sigList.length,
+              instructions_count: instructions.length,
+            },
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       return new Response(
         JSON.stringify({
           success: false,
           error: "MT5 account not found. Add and verify this MT5 account in the app first.",
         }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Demo mode no longer requires approval/verification.
+    // Live mode can still enforce approval via isApprovedAccountForMode if desired.
+    if (ea_mode === "live" && !isApprovedAccountForMode(acct as any, ea_mode)) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `Unauthorized: MT5 login must be an approved ${ea_mode} account in this platform.`,
+        }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
@@ -188,7 +281,7 @@ Deno.serve(async (req: Request) => {
     // Pull newest active signals; include mt5_symbol so EA gets the symbol name used in MT5 Market Watch
     const { data: signals, error: sigErr } = await supabase
       .from("signals")
-      .select("id, symbol, mt5_symbol, direction, entry_price, stop_loss, take_profit, tp1, risk_reward_ratio, created_at, is_active, signal_status")
+      .select("id, symbol, mt5_symbol, direction, entry_price, stop_loss, take_profit, tp1, risk_reward_ratio, confidence, confidence_percentage, created_at, is_active, signal_status")
       .eq("is_active", true)
       .eq("signal_status", "ACTIVE")
       .order("created_at", { ascending: false })
@@ -196,6 +289,20 @@ Deno.serve(async (req: Request) => {
 
     if (sigErr) throw sigErr;
     const sigList = signals || [];
+
+    // Per-user minimum confidence threshold (defaults to 50%)
+    const { data: profileRow, error: profErr } = await supabase
+      .from("profiles")
+      .select("ai_min_confidence_percent")
+      .eq("id", acct.user_id)
+      .maybeSingle();
+    if (profErr) {
+      console.warn("[mt5-get-instructions] profiles load failed:", profErr.message);
+    }
+    const minConfidencePercent = Math.max(
+      0,
+      Math.min(100, Number((profileRow as any)?.ai_min_confidence_percent) || 50),
+    );
 
     // Load per-symbol settings for this mt5_login. Keyed by Deriv symbol code (e.g., "R_50").
     const { data: symbolRows, error: symErr } = await supabase
@@ -235,6 +342,9 @@ Deno.serve(async (req: Request) => {
       const id = String(s.id);
       if (executed.has(id)) continue;
       if (!s.symbol || !s.direction) continue;
+
+      const confidencePercent = Number((s as any).confidence_percentage ?? (s as any).confidence ?? 0) || 0;
+      if (confidencePercent < minConfidencePercent) continue;
 
       const symbolCode = String(s.symbol || "").trim();
       const settings = symbolSettings.get(symbolCode);
@@ -299,6 +409,7 @@ Deno.serve(async (req: Request) => {
         symbol: symbolForEA,
         symbol_code: rawSymbol,
         direction: s.direction,
+        confidence_percent: confidencePercent,
         entry_type: "market",
         entry_price: Number(s.entry_price) || 0,
         stop_loss: sl,
@@ -319,6 +430,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         instructions,
+        min_confidence_percent: minConfidencePercent,
         debug: {
           active_signals_count: sigList.length,
           already_executed_count: executed.size,

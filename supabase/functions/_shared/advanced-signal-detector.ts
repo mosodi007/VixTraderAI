@@ -79,7 +79,7 @@ export class AdvancedSignalDetector {
   // Tuned for low symbol count (1HZ30V/1HZ75V): be less strict on signal *frequency*,
   // while keeping the trend/structure + strong-trend guards to avoid fighting trend.
   private minTriggers: number = 3;
-  private minConfidence: number = 55;
+  private minConfidence: number = 50;
   private minRiskReward: number = 1.5;
   private atrSlMultiplier: number;
   private atrTpMultiplier: number;

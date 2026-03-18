@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { Login } from './pages/Login';
+import { Landing } from './pages/Landing';
 import { Dashboard } from './pages/Dashboard';
 import { Signals } from './pages/Signals';
 import { PastSignals } from './pages/PastSignals';
@@ -13,10 +14,12 @@ import { LiveAnalysis } from './pages/LiveAnalysis';
 function AppRoutes() {
   const { user, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState<'home' | 'signals' | 'past-signals' | 'performance' | 'settings' | 'debug' | 'live-analysis'>('home');
+  const [authHash, setAuthHash] = useState(() => window.location.hash.slice(1));
 
   useEffect(() => {
     const handleHashChange = () => {
       let hash = window.location.hash.slice(1);
+      setAuthHash(hash);
       if (hash === 'create-mt5') {
         window.location.hash = 'settings';
         hash = 'settings';
@@ -43,7 +46,8 @@ function AppRoutes() {
   }
 
   if (!user) {
-    return <Login />;
+    if (authHash === 'login' || authHash === 'signup') return <Login />;
+    return <Landing />;
   }
 
   switch (currentPage) {

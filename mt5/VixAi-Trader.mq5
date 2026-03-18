@@ -28,6 +28,9 @@ input bool   AllowNewTrades      = true;
 //--- prevent duplicates in-session
 string executedSignalIds[];
 
+//--- auth state
+bool gUnauthorized = false;
+
 //--- mapping: position_ticket -> signal_id (in-memory)
 long   mapTickets[];
 string mapSignalIds[];
@@ -39,6 +42,13 @@ double mapTakeProfits[];
 double mapLots[];
 
 void Log(string msg) { Print("[VixTraderAI_EA] ", msg); }
+
+bool IsDemoAccount()
+{
+  // ACCOUNT_TRADE_MODE: 0=real, 1=demo, 2=contest (broker-dependent)
+  long mode = (long)AccountInfoInteger(ACCOUNT_TRADE_MODE);
+  return (mode == 1);
+}
 
 //+------------------------------------------------------------------+
 string ExecGVKey(const string signal_id)
@@ -537,6 +547,7 @@ void ExecuteInstruction(const string obj)
 //+------------------------------------------------------------------+
 void PollBackend()
 {
+  if(gUnauthorized) return;
   string login = IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN));
   string body  = "{"
     "\"mt5_login\":\""+login+"\","
@@ -545,6 +556,13 @@ void PollBackend()
 
   string resp; int st;
   if(!HttpPost(ApiUrlInstructions, body, resp, st)) return;
+  if(st==401)
+  {
+    Log("Unauthorized: this MT5 login is not an approved DEMO account in VixAI. Disabling EA.");
+    gUnauthorized = true;
+    EventKillTimer();
+    return;
+  }
   if(st!=200)
   {
     Log("Instructions HTTP status=" + IntegerToString(st) + " resp=" + resp);
@@ -561,6 +579,11 @@ void PollBackend()
 int OnInit()
 {
   Log("Init");
+  if(!IsDemoAccount())
+  {
+    Log("Unauthorized: VixAi-Trader.mq5 is DEMO-only. Attach it to a DEMO account.");
+    return INIT_FAILED;
+  }
   ArrayResize(executedSignalIds, 0);
   ArrayResize(mapTickets, 0);
   ArrayResize(mapSignalIds, 0);
@@ -582,6 +605,7 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
+  if(gUnauthorized) return;
   // 1) Pull instructions
   PollBackend();
   // 2) Push realtime snapshots
