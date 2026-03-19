@@ -74,6 +74,13 @@ export interface CandleData {
   epoch: number;
 }
 
+export interface MultiTimeframeMarketData {
+  m1: CandleData[];
+  m5: CandleData[];
+  m15: CandleData[];
+  ticks: TickData[];
+}
+
 export class DerivAPI {
   private config: DerivAPIConfig;
   private wsUrl: string;
@@ -438,21 +445,71 @@ export class DerivAPI {
         false
       );
 
-      if (!result || !result.candles) {
+      // Deriv can return candles in different shapes depending on msg parsing path:
+      // - Array shape: response.candles (already extracted by executeRequest)
+      // - Object shape: { candles: [...] }
+      // - History shape: { history: { candles: [...] } } in some API wrappers
+      const rawCandles: any[] | null =
+        Array.isArray(result)
+          ? result
+          : Array.isArray(result?.candles)
+            ? result.candles
+            : Array.isArray(result?.history?.candles)
+              ? result.history.candles
+              : null;
+
+      if (!rawCandles || rawCandles.length === 0) {
+        console.warn(`[DerivAPI] Empty candle history for ${symbol} @ ${granularity}s (count=${count})`);
         return [];
       }
 
-      return result.candles.map((candle: any) => ({
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        epoch: candle.epoch,
-      }));
+      return rawCandles
+        .map((candle: any) => ({
+          open: Number(candle?.open),
+          high: Number(candle?.high),
+          low: Number(candle?.low),
+          close: Number(candle?.close),
+          epoch: Number(candle?.epoch),
+        }))
+        .filter(
+          (c: CandleData) =>
+            Number.isFinite(c.open) &&
+            Number.isFinite(c.high) &&
+            Number.isFinite(c.low) &&
+            Number.isFinite(c.close) &&
+            Number.isFinite(c.epoch),
+        );
     } catch (error) {
       console.error("Error fetching candle history:", error);
       return [];
     }
+  }
+
+  /**
+   * Fetch synchronized multi-timeframe market data for AMD strategy.
+   */
+  async getMultiTimeframeMarketData(
+    symbol: string,
+    options?: {
+      m1Count?: number;
+      m5Count?: number;
+      m15Count?: number;
+      tickCount?: number;
+    },
+  ): Promise<MultiTimeframeMarketData> {
+    const m1Count = Math.max(60, options?.m1Count ?? 240);
+    const m5Count = Math.max(40, options?.m5Count ?? 160);
+    const m15Count = Math.max(24, options?.m15Count ?? 96);
+    const tickCount = Math.max(200, options?.tickCount ?? 1000);
+
+    const [m1, m5, m15, ticks] = await Promise.all([
+      this.getCandleHistory(symbol, 60, m1Count),
+      this.getCandleHistory(symbol, 300, m5Count),
+      this.getCandleHistory(symbol, 900, m15Count),
+      this.getTickHistory(symbol, tickCount),
+    ]);
+
+    return { m1, m5, m15, ticks };
   }
 
   /**

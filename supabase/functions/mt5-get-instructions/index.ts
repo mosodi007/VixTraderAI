@@ -56,6 +56,12 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+function toMillis(v: string | null | undefined): number {
+  if (!v) return 0;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : 0;
+}
+
 type EaMode = "demo" | "live";
 
 function toEaMode(v: unknown): EaMode {
@@ -281,7 +287,7 @@ Deno.serve(async (req: Request) => {
     // Pull newest active signals; include mt5_symbol so EA gets the symbol name used in MT5 Market Watch
     const { data: signals, error: sigErr } = await supabase
       .from("signals")
-      .select("id, symbol, mt5_symbol, direction, entry_price, stop_loss, take_profit, tp1, risk_reward_ratio, confidence, confidence_percentage, created_at, is_active, signal_status")
+      .select("id, symbol, mt5_symbol, direction, entry_price, stop_loss, take_profit, tp1, risk_reward_ratio, confidence, confidence_percentage, created_at, is_active, signal_status, signal_type, technical_indicators")
       .eq("is_active", true)
       .eq("signal_status", "ACTIVE")
       .order("created_at", { ascending: false })
@@ -325,17 +331,20 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Get already-executed signal_ids for this account (use request mt5_login so it matches what EA sends when reporting)
+    // Get already-executed signal_ids for this account.
+    // We only treat signals as executed once the trade is actually "open" or "closed".
     const { data: executedTrades, error: trErr } = await supabase
       .from("trades")
-      .select("signal_id")
+      .select("signal_id,status")
       .eq("mt5_login", mt5_login)
       .not("signal_id", "is", null)
+      .in("status", ["open", "closed"])
       .order("created_at", { ascending: false })
       .limit(500);
 
     if (trErr) throw trErr;
     const executed = new Set((executedTrades || []).map((t: any) => String(t.signal_id)));
+    const dispatchRetrySeconds = Math.max(15, Number(Deno.env.get("DISPATCH_RETRY_SECONDS") || 120));
 
     const instructions: any[] = [];
     for (const s of sigList) {
@@ -371,37 +380,80 @@ Deno.serve(async (req: Request) => {
       const percent = round2(settings?.percent ?? 0);
       const lotSizeForDispatch = lot_mode === "fixed" ? fixed_lot : 0;
 
-      // Dispatch lock: record that this signal was sent to this mt5_login.
-      // This prevents duplicate instructions if the EA polls again before it reports trade open,
-      // or if multiple EA instances are polling the same mt5_login.
+      // Dispatch lock: avoid duplicate "sent" rows on repeated EA polls.
+      // Retry a "sent" dispatch only after DISPATCH_RETRY_SECONDS.
       const nowIso = new Date().toISOString();
-      const { error: dispatchErr } = await supabase
+      const { data: recentRows, error: recentErr } = await supabase
         .from("trades")
-        .insert({
-          user_id: acct.user_id,
-          mt5_login,
-          signal_id: id,
-          symbol: symbolForEA,
-          direction: String(s.direction),
-          entry_price: Number(s.entry_price) || 0,
-          stop_loss: sl,
-          take_profit: tpVal,
-          lot_size: lotSizeForDispatch,
-          profit_loss: 0,
-          status: "sent",
-          opened_at: nowIso,
-          closed_at: null,
-        });
-      if (dispatchErr) {
-        // If already inserted concurrently, ignore; otherwise log.
-        const msg = String((dispatchErr as any)?.message || dispatchErr);
-        if (msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
-          executed.add(id);
+        .select("id,status,created_at,opened_at")
+        .eq("mt5_login", mt5_login)
+        .eq("signal_id", id)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (recentErr) {
+        console.warn("[mt5-get-instructions] dispatch precheck failed:", recentErr.message);
+      }
+
+      const rows = recentRows || [];
+      const hasExecutedRow = rows.some((r: any) => ["open", "closed"].includes(String(r.status || "")));
+      if (hasExecutedRow) {
+        executed.add(id);
+        continue;
+      }
+
+      const sentRow = rows.find((r: any) => String(r.status || "") === "sent");
+      if (sentRow) {
+        const sentAtMs = Math.max(toMillis((sentRow as any).opened_at), toMillis((sentRow as any).created_at));
+        const ageSec = sentAtMs > 0 ? (Date.now() - sentAtMs) / 1000 : Number.POSITIVE_INFINITY;
+        if (ageSec < dispatchRetrySeconds) {
+          // Still inside retry lock window; don't send duplicate instruction.
           continue;
         }
-        console.warn("[mt5-get-instructions] dispatch insert failed:", msg);
+      }
+
+      let dispatchErr: any = null;
+      if (sentRow?.id) {
+        // Reuse stale sent row instead of creating a new duplicate.
+        const { error } = await supabase
+          .from("trades")
+          .update({
+            symbol: symbolForEA,
+            direction: String(s.direction),
+            entry_price: Number(s.entry_price) || 0,
+            stop_loss: sl,
+            take_profit: tpVal,
+            lot_size: lotSizeForDispatch,
+            profit_loss: 0,
+            status: "sent",
+            opened_at: nowIso,
+            closed_at: null,
+          })
+          .eq("id", sentRow.id);
+        dispatchErr = error;
       } else {
-        executed.add(id);
+        const { error } = await supabase
+          .from("trades")
+          .insert({
+            user_id: acct.user_id,
+            mt5_login,
+            signal_id: id,
+            symbol: symbolForEA,
+            direction: String(s.direction),
+            entry_price: Number(s.entry_price) || 0,
+            stop_loss: sl,
+            take_profit: tpVal,
+            lot_size: lotSizeForDispatch,
+            profit_loss: 0,
+            status: "sent",
+            opened_at: nowIso,
+            closed_at: null,
+          });
+        dispatchErr = error;
+      }
+      if (dispatchErr) {
+        const msg = String((dispatchErr as any)?.message || dispatchErr);
+        console.warn("[mt5-get-instructions] dispatch write failed:", msg);
+        continue;
       }
 
       instructions.push({
@@ -410,6 +462,8 @@ Deno.serve(async (req: Request) => {
         symbol_code: rawSymbol,
         direction: s.direction,
         confidence_percent: confidencePercent,
+        signal_type: (s as any).signal_type || "STANDARD",
+        amd_context: (s as any)?.technical_indicators?.amd || null,
         entry_type: "market",
         entry_price: Number(s.entry_price) || 0,
         stop_loss: sl,

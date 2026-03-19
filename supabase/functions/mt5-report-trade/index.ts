@@ -130,13 +130,19 @@ Deno.serve(async (req: Request) => {
     const ticket = body.ticket != null ? String(body.ticket) : null;
     const error_message = body.error_message != null ? String(body.error_message) : null;
 
-    // Upsert into trades keyed by (mt5_login, signal_id) via manual lookup
-    const { data: existing } = await supabase
+    // Find recent rows for this signal/account; duplicates may exist from old dispatch behavior.
+    const { data: existingRows, error: existingErr } = await supabase
       .from("trades")
-      .select("id")
+      .select("id,status,created_at")
       .eq("mt5_login", mt5_login)
       .eq("signal_id", signal_id)
-      .maybeSingle();
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (existingErr) throw existingErr;
+
+    const rows = existingRows || [];
+    const openLike = rows.find((r: any) => String(r.status || "") !== "closed");
+    const existing = openLike || rows[0] || null;
 
     const nowIso = new Date().toISOString();
 
@@ -174,6 +180,24 @@ Deno.serve(async (req: Request) => {
       }
       const { error } = await supabase.from("trades").update(update).eq("id", existing.id);
       if (error) throw error;
+
+      // If this trade is closed, close all duplicate rows for same login/signal to stop future duplication noise.
+      if (status === "closed") {
+        const { error: closeDupErr } = await supabase
+          .from("trades")
+          .update({
+            status: "closed",
+            exit_price: exit_price ?? entry_price ?? null,
+            closed_at: nowIso,
+            profit_loss: profit_loss || 0,
+          })
+          .eq("mt5_login", mt5_login)
+          .eq("signal_id", signal_id)
+          .in("status", ["sent", "open"]);
+        if (closeDupErr) {
+          console.warn("[mt5-report-trade] close duplicate rows warning:", closeDupErr.message);
+        }
+      }
     }
 
     // If MT5 closed the trade, immediately close the linked signal in DB.

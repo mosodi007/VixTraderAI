@@ -78,8 +78,8 @@ export class AdvancedSignalDetector {
   private analyzer: TechnicalAnalyzer;
   // Tuned for low symbol count (1HZ30V/1HZ75V): be less strict on signal *frequency*,
   // while keeping the trend/structure + strong-trend guards to avoid fighting trend.
-  private minTriggers: number = 3;
-  private minConfidence: number = 50;
+  private minTriggers: number = 2;
+  private minConfidence: number = 55;
   private minRiskReward: number = 1.5;
   private atrSlMultiplier: number;
   private atrTpMultiplier: number;
@@ -711,5 +711,269 @@ export class AdvancedSignalDetector {
 
 export function createSignalDetector(ticks: TickData[], config?: SignalDetectorConfig): AdvancedSignalDetector {
   return new AdvancedSignalDetector(ticks, config);
+}
+
+export interface AmdCandle {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  epoch: number;
+}
+
+export interface AmdMarketData {
+  m1: AmdCandle[];
+  m5: AmdCandle[];
+  m15: AmdCandle[];
+  ticks: TickData[];
+}
+
+export interface AmdDetectionResult {
+  shouldGenerateSignal: boolean;
+  direction: "BUY" | "SELL" | null;
+  confidence: number;
+  riskRewardRatio: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  tp1: number;
+  timeframe: "M1/M5";
+  reasoning: string;
+  amd: {
+    phase: "accumulation" | "manipulation" | "distribution" | "none";
+    rangeHigh: number;
+    rangeLow: number;
+    sweepHigh: boolean;
+    sweepLow: boolean;
+    distributionStrength: number;
+    htfBias: "bullish" | "bearish" | "neutral";
+    blockedReasons: string[];
+  };
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n));
+}
+
+function mean(values: number[]): number {
+  if (!values.length) return 0;
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+function atrLike(candles: AmdCandle[], period: number): number {
+  if (candles.length < 2) return 0;
+  const start = Math.max(1, candles.length - period);
+  const trs: number[] = [];
+  for (let i = start; i < candles.length; i++) {
+    const c = candles[i];
+    const p = candles[i - 1];
+    const tr = Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+    trs.push(tr);
+  }
+  return mean(trs);
+}
+
+function slope(values: number[]): number {
+  if (values.length < 2) return 0;
+  return (values[values.length - 1] - values[0]) / values.length;
+}
+
+function detectHtfBias(m15: AmdCandle[]): "bullish" | "bearish" | "neutral" {
+  if (m15.length < 8) return "neutral";
+  const closes = m15.slice(-8).map((c) => c.close);
+  const s = slope(closes);
+  const avg = mean(closes);
+  if (avg <= 0) return "neutral";
+  const pct = (s * closes.length) / avg;
+  if (pct > 0.0012) return "bullish";
+  if (pct < -0.0012) return "bearish";
+  return "neutral";
+}
+
+function findAccumulationRange(m5: AmdCandle[]): { ok: boolean; high: number; low: number; compression: number } {
+  const recent = m5.slice(-12);
+  if (recent.length < 12) return { ok: false, high: 0, low: 0, compression: 0 };
+  const highs = recent.map((c) => c.high);
+  const lows = recent.map((c) => c.low);
+  const closes = recent.map((c) => c.close);
+  const high = Math.max(...highs);
+  const low = Math.min(...lows);
+  const width = Math.max(high - low, 1e-9);
+  const atr = atrLike(recent, 10);
+  const netMove = Math.abs(closes[closes.length - 1] - closes[0]);
+  const compression = width > 0 ? netMove / width : 1;
+  const ok = atr > 0 && width <= atr * 5.5 && compression <= 0.45;
+  return { ok, high, low, compression };
+}
+
+function detectManipulationAndDistribution(m5: AmdCandle[], m1: AmdCandle[], rangeHigh: number, rangeLow: number): {
+  phase: "manipulation" | "distribution" | "none";
+  direction: "BUY" | "SELL" | null;
+  sweepHigh: boolean;
+  sweepLow: boolean;
+  distributionStrength: number;
+} {
+  const m5Last = m5.slice(-3);
+  const m1Last = m1.slice(-8);
+  if (m5Last.length < 3 || m1Last.length < 5) {
+    return { phase: "none", direction: null, sweepHigh: false, sweepLow: false, distributionStrength: 0 };
+  }
+
+  const m5Current = m5Last[m5Last.length - 1];
+  const m1Current = m1Last[m1Last.length - 1];
+  const m1Prev = m1Last[m1Last.length - 2];
+
+  const sweepHigh = m5Current.high > rangeHigh && m5Current.close < rangeHigh;
+  const sweepLow = m5Current.low < rangeLow && m5Current.close > rangeLow;
+  if (!sweepHigh && !sweepLow) {
+    return { phase: "none", direction: null, sweepHigh: false, sweepLow: false, distributionStrength: 0 };
+  }
+
+  const displacement = Math.abs(m1Current.close - m1Prev.close);
+  const atrM1 = atrLike(m1Last, 6);
+  const strength = atrM1 > 0 ? clamp((displacement / atrM1) * 40 + 45, 0, 99) : 45;
+
+  if (sweepLow) {
+    const bullishConfirm = m1Current.close > rangeLow && m1Current.close > m1Prev.high;
+    return {
+      phase: bullishConfirm ? "distribution" : "manipulation",
+      direction: bullishConfirm ? "BUY" : null,
+      sweepHigh: false,
+      sweepLow: true,
+      distributionStrength: Math.round(strength),
+    };
+  }
+
+  const bearishConfirm = m1Current.close < rangeHigh && m1Current.close < m1Prev.low;
+  return {
+    phase: bearishConfirm ? "distribution" : "manipulation",
+    direction: bearishConfirm ? "SELL" : null,
+    sweepHigh: true,
+    sweepLow: false,
+    distributionStrength: Math.round(strength),
+  };
+}
+
+function buildAdaptiveTargets(
+  direction: "BUY" | "SELL",
+  entryPrice: number,
+  rangeHigh: number,
+  rangeLow: number,
+  m1: AmdCandle[],
+): { stopLoss: number; takeProfit: number; rr: number } {
+  const atr = Math.max(atrLike(m1, 14), entryPrice * 0.0007);
+  const baseRisk = Math.max(atr * 1.2, Math.abs(rangeHigh - rangeLow) * 0.35);
+  const rr = clamp(2 + (atr / Math.max(entryPrice, 1e-9)) * 2000, 2, 4);
+  const risk = Math.max(baseRisk, 1e-6);
+
+  if (direction === "BUY") {
+    const stopLoss = Math.max(0.01, Math.min(entryPrice - 0.01, rangeLow - atr * 0.55));
+    const adjRisk = Math.max(entryPrice - stopLoss, risk);
+    const takeProfit = entryPrice + rr * adjRisk;
+    return { stopLoss, takeProfit, rr };
+  }
+
+  const stopLoss = Math.max(entryPrice + 0.01, rangeHigh + atr * 0.55);
+  const adjRisk = Math.max(stopLoss - entryPrice, risk);
+  const takeProfit = Math.max(0.01, entryPrice - rr * adjRisk);
+  return { stopLoss, takeProfit, rr };
+}
+
+export function detectAmdSignal(data: AmdMarketData): AmdDetectionResult {
+  const m1 = data.m1 || [];
+  const m5 = data.m5 || [];
+  const m15 = data.m15 || [];
+  const lastPrice = (m1[m1.length - 1]?.close ?? data.ticks[data.ticks.length - 1]?.quote ?? 0);
+
+  const base: AmdDetectionResult = {
+    shouldGenerateSignal: false,
+    direction: null,
+    confidence: 0,
+    riskRewardRatio: 0,
+    entryPrice: lastPrice,
+    stopLoss: 0,
+    takeProfit: 0,
+    tp1: 0,
+    timeframe: "M1/M5",
+    reasoning: "AMD setup not ready",
+    amd: {
+      phase: "none",
+      rangeHigh: 0,
+      rangeLow: 0,
+      sweepHigh: false,
+      sweepLow: false,
+      distributionStrength: 0,
+      htfBias: "neutral",
+      blockedReasons: [],
+    },
+  };
+
+  if (m1.length < 40 || m5.length < 20 || m15.length < 10) {
+    return { ...base, reasoning: "Insufficient MTF data for AMD analysis." };
+  }
+
+  const htfBias = detectHtfBias(m15);
+  const range = findAccumulationRange(m5);
+  if (!range.ok) {
+    return {
+      ...base,
+      reasoning: "No valid accumulation range detected.",
+      amd: { ...base.amd, phase: "accumulation", htfBias, rangeHigh: range.high, rangeLow: range.low, blockedReasons: ["no_accumulation"] },
+    };
+  }
+
+  const md = detectManipulationAndDistribution(m5, m1, range.high, range.low);
+  const blockedReasons: string[] = [];
+  if (md.phase !== "distribution" || !md.direction) blockedReasons.push("no_distribution");
+  if (htfBias !== "neutral") {
+    const align = (htfBias === "bullish" && md.direction === "BUY") || (htfBias === "bearish" && md.direction === "SELL");
+    if (!align) blockedReasons.push("htf_bias_mismatch");
+  }
+
+  if (blockedReasons.length > 0) {
+    return {
+      ...base,
+      reasoning: `AMD blocked: ${blockedReasons.join(", ")}`,
+      amd: {
+        ...base.amd,
+        phase: md.phase,
+        rangeHigh: range.high,
+        rangeLow: range.low,
+        sweepHigh: md.sweepHigh,
+        sweepLow: md.sweepLow,
+        distributionStrength: md.distributionStrength,
+        htfBias,
+        blockedReasons,
+      },
+    };
+  }
+
+  const entryPrice = lastPrice;
+  const targets = buildAdaptiveTargets(md.direction!, entryPrice, range.high, range.low, m1);
+  const confidence = clamp(Math.round(md.distributionStrength + (htfBias === "neutral" ? 0 : 8)), 50, 98);
+  const reasoning = `AMD distribution confirmed (${md.direction}) after liquidity sweep. HTF bias=${htfBias}, range=[${range.low.toFixed(2)}..${range.high.toFixed(2)}], confidence=${confidence}%.`;
+
+  return {
+    shouldGenerateSignal: true,
+    direction: md.direction,
+    confidence,
+    riskRewardRatio: Number(targets.rr.toFixed(2)),
+    entryPrice: Number(entryPrice.toFixed(5)),
+    stopLoss: Number(targets.stopLoss.toFixed(5)),
+    takeProfit: Number(targets.takeProfit.toFixed(5)),
+    tp1: Number(targets.takeProfit.toFixed(5)),
+    timeframe: "M1/M5",
+    reasoning,
+    amd: {
+      phase: "distribution",
+      rangeHigh: Number(range.high.toFixed(5)),
+      rangeLow: Number(range.low.toFixed(5)),
+      sweepHigh: md.sweepHigh,
+      sweepLow: md.sweepLow,
+      distributionStrength: md.distributionStrength,
+      htfBias,
+      blockedReasons,
+    },
+  };
 }
 

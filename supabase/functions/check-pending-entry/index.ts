@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createDerivAPI } from "../_shared/deriv-api.ts";
+import { detectAmdSignal } from "../_shared/advanced-signal-detector.ts";
 import { getPointSize } from "../_shared/symbol-sl-tp.ts";
 import { sendSignalEmail, getSignalNotificationEmails } from "../_shared/resend.ts";
 
@@ -197,6 +198,41 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
+        // Revalidate AMD context at conversion time.
+        const amdSnapshot = await derivAPI.getMultiTimeframeMarketData(symbol, {
+          m1Count: 220,
+          m5Count: 140,
+          m15Count: 90,
+          tickCount: 800,
+        });
+        const amdNow = detectAmdSignal({
+          m1: amdSnapshot.m1,
+          m5: amdSnapshot.m5,
+          m15: amdSnapshot.m15,
+          ticks: amdSnapshot.ticks,
+        });
+        if (!amdNow.shouldGenerateSignal || amdNow.direction !== direction) {
+          await supabase
+            .from("pending_setups")
+            .update({
+              status: "expired",
+              updated_at: new Date().toISOString(),
+              reasoning: `${pending.reasoning ?? ""}\n\n[PENDING AMD INVALIDATED] blocked=${amdNow.amd.blockedReasons.join("|") || "no_distribution"}`,
+            })
+            .eq("id", pending.id);
+
+          expiredCount++;
+          results.push({
+            id: pending.id,
+            symbol,
+            direction,
+            status: "expired_amd_invalidated",
+            current_price: currentPrice,
+            suggested_entry: suggestedEntry,
+          });
+          continue;
+        }
+
         // Convert pending setup into live signal
         const mt5Symbol = derivAPI.getMT5Symbol(symbol);
         const risk = riskPending;
@@ -225,7 +261,10 @@ Deno.serve(async (req: Request) => {
             trigger_count: (pending.technical_indicators?.triggers || []).length ?? 0,
             market_context: pending.reasoning,
             reasoning: pending.reasoning,
-            technical_indicators: pending.technical_indicators ?? {},
+            technical_indicators: {
+              ...(pending.technical_indicators ?? {}),
+              amd_revalidated: amdNow.amd,
+            },
             expires_at: new Date("2099-12-31T23:59:59Z").toISOString(),
             is_active: true,
             order_type: "MARKET",
@@ -276,7 +315,8 @@ Deno.serve(async (req: Request) => {
 
         // Send signal notification email via Resend
         try {
-          const emails = await getSignalNotificationEmails(supabase);
+          const signalConfidence = Number((newSignal as any)?.confidence_percentage ?? (newSignal as any)?.confidence ?? pending.confidence ?? 0);
+          const emails = await getSignalNotificationEmails(supabase, signalConfidence);
           if (emails.length > 0) {
             const payload = {
               id: newSignal.id,

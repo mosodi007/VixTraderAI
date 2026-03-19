@@ -7,14 +7,43 @@
 const RESEND_API = "https://api.resend.com/emails";
 
 /**
- * Get emails of users who have at least one verified MT5 account. Signals are sent only to those accounts, at the email registered in their profile.
+ * Get emails of users who should receive this signal email.
+ *
+ * Filters:
+ * - User must have at least one verified *real/live* MT5 account.
+ * - User's `profiles.ai_min_confidence_percent` must be <= the signal confidence.
  */
-export async function getSignalNotificationEmails(supabase: any): Promise<string[]> {
-  const { data: accounts } = await supabase.from("mt5_accounts").select("user_id").eq("verified", true);
+export async function getSignalNotificationEmails(
+  supabase: any,
+  signalConfidencePercent: number,
+): Promise<string[]> {
+  const conf = Math.max(0, Math.min(100, Number(signalConfidencePercent) || 0));
+
+  // Only notify users with an approved/verified *real/live* MT5 account.
+  // Users can still have verified demo accounts, but they should not receive "live trading" signal emails.
+  const { data: accounts } = await supabase
+    .from("mt5_accounts")
+    .select("user_id,account_type")
+    .eq("verified", true)
+    .in("account_type", ["real", "live"]);
+
   const userIds = [...new Set((accounts || []).map((a: { user_id: string }) => a.user_id).filter(Boolean))];
   if (userIds.length === 0) return [];
-  const { data: profiles } = await supabase.from("profiles").select("email").in("id", userIds);
-  return (profiles || []).map((p: { email: string }) => p.email).filter((e: string) => e && e.trim());
+
+  const { data: profiles } = await supabase
+    .from("profiles")
+    .select("email,ai_min_confidence_percent")
+    .in("id", userIds);
+
+  return (profiles || [])
+    .filter((p: { email: string; ai_min_confidence_percent?: number | null }) => {
+      const rawMin = p.ai_min_confidence_percent;
+      const minConf = rawMin == null ? 50 : Number(rawMin);
+      const effectiveMin = Number.isFinite(minConf) ? minConf : 50; // default
+      return effectiveMin <= conf;
+    })
+    .map((p: { email: string }) => p.email)
+    .filter((e: string) => e && e.trim());
 }
 
 export interface SignalEmailPayload {
