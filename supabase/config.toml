@@ -15,3 +15,6 @@ verify_jwt = false
 
 [functions.update-signal-filters]
 verify_jwt = false
+
+[functions.auto-generate-signals]
+verify_jwt = false

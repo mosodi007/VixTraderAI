@@ -7,9 +7,13 @@ import { Save, AlertCircle, CheckCircle, BarChart3 } from 'lucide-react';
 import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 
 // Keep in sync with `supabase/functions/auto-generate-signals/index.ts` monitored symbols.
-const SYMBOLS = ['1HZ10V', '1HZ30V', '1HZ75V', '1HZ100V'] as const;
+const SYMBOLS = ['R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ30V', '1HZ75V', '1HZ100V'] as const;
 
 const SYMBOL_NAMES: Record<(typeof SYMBOLS)[number], string> = {
+  'R_25': 'Volatility 25 Index',
+  'R_50': 'Volatility 50 Index',
+  'R_75': 'Volatility 75 Index',
+  'R_100': 'Volatility 100 Index',
   '1HZ10V': 'Volatility 10 (1s) Index',
   '1HZ30V': 'Volatility 30 (1s) Index',
   '1HZ75V': 'Volatility 75 (1s) Index',
@@ -18,6 +22,10 @@ const SYMBOL_NAMES: Record<(typeof SYMBOLS)[number], string> = {
 
 // Per-symbol lot constraints (Deriv MT5). EA still enforces broker min/max/step at execution time.
 const SYMBOL_MIN_LOT: Record<(typeof SYMBOLS)[number], number> = {
+  'R_25': 0.5,
+  'R_50': 4,
+  'R_75': 0.001,
+  'R_100': 1,
   '1HZ10V': 0.5,
   '1HZ30V': 0.2,
   '1HZ75V': 0.05,
@@ -25,10 +33,25 @@ const SYMBOL_MIN_LOT: Record<(typeof SYMBOLS)[number], number> = {
 };
 
 const SYMBOL_MAX_LOT: Record<(typeof SYMBOLS)[number], number> = {
+  'R_25': 400,
+  'R_50': 3700,
+  'R_75': 50,
+  'R_100': 220,
   '1HZ10V': 400,
   '1HZ30V': 120,
   '1HZ75V': 80,
   '1HZ100V': 330,
+};
+
+const SYMBOL_LOT_STEP: Record<(typeof SYMBOLS)[number], number> = {
+  'R_25': 0.01,
+  'R_50': 0.01,
+  'R_75': 0.001,
+  'R_100': 0.01,
+  '1HZ10V': 0.01,
+  '1HZ30V': 0.01,
+  '1HZ75V': 0.01,
+  '1HZ100V': 0.01,
 };
 
 /** Maps UI account type to Deriv MT5 server (required for verification API). */
@@ -262,7 +285,7 @@ export function Settings() {
     setSymbolPoints((prev) => ({
       ...prev,
       [symbol]: {
-        ...(prev[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 800, tpPoints: 2400 }),
+        ...(prev[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 400, tpPoints: 1200 }),
         slPoints: sl,
         tpPoints: sl * 3,
       },
@@ -286,7 +309,7 @@ export function Settings() {
 
     try {
       for (const symbol of SYMBOLS) {
-        const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 800, tpPoints: 2400 };
+        const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 400, tpPoints: 1200 };
         const sl = Math.max(1, Math.round(Number(pts.slPoints)) || 400);
         const tp = sl * 3;
 
@@ -332,7 +355,10 @@ export function Settings() {
         const lot_mode: LotMode = s.lotMode === 'percent_balance' ? 'percent_balance' : 'fixed';
         const minLot = SYMBOL_MIN_LOT[symbol] ?? 0;
         const maxLot = SYMBOL_MAX_LOT[symbol] ?? Number.POSITIVE_INFINITY;
-        const fixed_lot_raw = Math.round(Math.max(0, Number(s.fixedLot) || 0) * 100) / 100;
+        const step = SYMBOL_LOT_STEP[symbol] ?? 0.01;
+        const decimals = step === 0.001 ? 3 : 2;
+        const factor = Math.pow(10, decimals);
+        const fixed_lot_raw = Math.round(Math.max(0, Number(s.fixedLot) || 0) * factor) / factor;
         const fixed_lot = Math.min(maxLot, Math.max(minLot, fixed_lot_raw));
         const percent = Math.round(Math.max(0, Math.min(100, Number(s.percent) || 0)) * 100) / 100;
 
@@ -692,7 +718,7 @@ export function Settings() {
           </div>
           )}
 
-          {/* <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
+          <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-emerald-500" />
               Symbol SL/TP Points
@@ -768,7 +794,7 @@ export function Settings() {
                 {pointsLoading ? 'Saving...' : 'Save Symbol Points'}
               </button>
             </form>
-          </div> */}
+          </div>
 
           <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Trade filters</h3>
@@ -909,6 +935,7 @@ export function Settings() {
                           const isPercent = s.lotMode === 'percent_balance';
                           const minLot = SYMBOL_MIN_LOT[symbol] ?? 0;
                           const maxLot = SYMBOL_MAX_LOT[symbol] ?? 1000000;
+                          const lotStep = SYMBOL_LOT_STEP[symbol] ?? 0.01;
                           return (
                             <tr key={symbol} className="border-b border-slate-100 dark:border-slate-700/50">
                               <td className="py-2 px-2 text-slate-900 dark:text-white">
@@ -938,7 +965,7 @@ export function Settings() {
                                   type="number"
                                   min={minLot}
                                   max={maxLot}
-                                  step={0.01}
+                                  step={lotStep}
                                   value={s.fixedLot}
                                   onChange={(e) => setTradeSettingForSymbol(symbol, { fixedLot: Number(e.target.value) || 0 })}
                                   disabled={isPercent}

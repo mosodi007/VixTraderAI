@@ -10,7 +10,9 @@ const corsHeaders = {
 // Map Deriv symbol to MT5 Market Watch name (must match what EA sees in MT5)
 const DERIV_TO_MT5_SYMBOL: Record<string, string> = {
   "R_10": "Volatility 10 Index",
+  "R_25": "Volatility 25 Index",
   "R_50": "Volatility 50 Index",
+  "R_75": "Volatility 75 Index",
   "R_100": "Volatility 100 Index",
   "1HZ10V": "Volatility 10 (1s) Index",
   "1HZ30V": "Volatility 30 (1s) Index",
@@ -32,6 +34,10 @@ type SymbolSettings = {
 
 // Default minimum lots (Deriv MT5) for convenience; EA also clamps to broker min/max/step at execution time.
 const SYMBOL_MIN_LOT: Record<string, number> = {
+  "R_25": 0.5,
+  "R_50": 4,
+  "R_75": 0.001,
+  "R_100": 1,
   "1HZ10V": 0.5,
   "1HZ30V": 0.2,
   "1HZ75V": 0.05,
@@ -39,6 +45,10 @@ const SYMBOL_MIN_LOT: Record<string, number> = {
 };
 
 const SYMBOL_MAX_LOT: Record<string, number> = {
+  "R_25": 400,
+  "R_50": 3700,
+  "R_75": 50,
+  "R_100": 220,
   "1HZ10V": 400,
   "1HZ30V": 120,
   "1HZ75V": 80,
@@ -347,24 +357,45 @@ Deno.serve(async (req: Request) => {
     const dispatchRetrySeconds = Math.max(15, Number(Deno.env.get("DISPATCH_RETRY_SECONDS") || 120));
 
     const instructions: any[] = [];
+    const skippedByReason: Record<string, number> = {};
+    const skippedSignals: Array<{ signal_id: string; symbol: string; reason: string }> = [];
+    const recordSkip = (reason: string, signalId: string, symbol: string) => {
+      skippedByReason[reason] = (skippedByReason[reason] || 0) + 1;
+      if (skippedSignals.length < 20) {
+        skippedSignals.push({ signal_id: signalId, symbol, reason });
+      }
+    };
     for (const s of sigList) {
       const id = String(s.id);
-      if (executed.has(id)) continue;
-      if (!s.symbol || !s.direction) continue;
+      const symbolCode = String(s.symbol || "").trim();
+      if (executed.has(id)) {
+        recordSkip("already_executed", id, symbolCode);
+        continue;
+      }
+      if (!s.symbol || !s.direction) {
+        recordSkip("missing_symbol_or_direction", id, symbolCode);
+        continue;
+      }
 
       const confidencePercent = Number((s as any).confidence_percentage ?? (s as any).confidence ?? 0) || 0;
-      if (confidencePercent < minConfidencePercent) continue;
+      if (confidencePercent < minConfidencePercent) {
+        recordSkip("below_min_confidence", id, symbolCode);
+        continue;
+      }
 
-      const symbolCode = String(s.symbol || "").trim();
       const settings = symbolSettings.get(symbolCode);
       if (settings && settings.trade_enabled === false) {
+        recordSkip("trade_disabled_for_symbol", id, symbolCode);
         continue;
       }
 
       const tp = s.tp1 ?? s.take_profit;
       const sl = Number(s.stop_loss);
       const tpVal = Number(tp);
-      if (!Number.isFinite(sl) || !Number.isFinite(tpVal) || sl <= 0 || tpVal <= 0) continue;
+      if (!Number.isFinite(sl) || !Number.isFinite(tpVal) || sl <= 0 || tpVal <= 0) {
+        recordSkip("invalid_sl_or_tp", id, symbolCode);
+        continue;
+      }
       // EA needs the symbol as shown in MT5 Market Watch (e.g. "Volatility 30 (1s) Index"), not Deriv code "1HZ30V"
       const rawSymbol = symbolCode;
       const symbolForEA =
@@ -398,6 +429,7 @@ Deno.serve(async (req: Request) => {
       const hasExecutedRow = rows.some((r: any) => ["open", "closed"].includes(String(r.status || "")));
       if (hasExecutedRow) {
         executed.add(id);
+        recordSkip("already_executed_trade_row", id, symbolCode);
         continue;
       }
 
@@ -407,6 +439,7 @@ Deno.serve(async (req: Request) => {
         const ageSec = sentAtMs > 0 ? (Date.now() - sentAtMs) / 1000 : Number.POSITIVE_INFINITY;
         if (ageSec < dispatchRetrySeconds) {
           // Still inside retry lock window; don't send duplicate instruction.
+          recordSkip("dispatch_retry_lock", id, symbolCode);
           continue;
         }
       }
@@ -453,6 +486,7 @@ Deno.serve(async (req: Request) => {
       if (dispatchErr) {
         const msg = String((dispatchErr as any)?.message || dispatchErr);
         console.warn("[mt5-get-instructions] dispatch write failed:", msg);
+        recordSkip("dispatch_write_failed", id, symbolCode);
         continue;
       }
 
@@ -489,6 +523,8 @@ Deno.serve(async (req: Request) => {
           active_signals_count: sigList.length,
           already_executed_count: executed.size,
           instructions_count: instructions.length,
+          skipped_by_reason: skippedByReason,
+          skipped_signals: skippedSignals,
         },
         connection_registered: !upsertErr,
         ...(upsertErr && { connection_error: upsertErr.message }),

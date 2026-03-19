@@ -538,7 +538,9 @@ export class DerivAPI {
     // Map Deriv synthetic indices to MT5 format
     const symbolMap: { [key: string]: string } = {
       'R_10': 'Volatility 10 Index',
+      'R_25': 'Volatility 25 Index',
       'R_50': 'Volatility 50 Index',
+      'R_75': 'Volatility 75 Index',
       'R_100': 'Volatility 100 Index',
       '1HZ10V': 'Volatility 10 (1s) Index',
       '1HZ30V': 'Volatility 30 (1s) Index',

@@ -1,6 +1,7 @@
+//Analyze-market
+
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { getSlTpDistanceInPrice } from "../_shared/symbol-sl-tp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -124,18 +125,27 @@ Provide a complete trading signal with entry, stop loss, and take profit levels.
     const entryPrice = analysis.entry_price || marketData.price;
     const confidence = Math.min(95, Math.max(60, analysis.confidence || 75));
 
-    const { slDistance, tpDistance } = getSlTpDistanceInPrice(symbol);
+    const pipSize = getPipSize(symbol);
+    const stopLossPips = analysis.stop_loss_pips || getStopLossPips(symbol, marketData.volatility);
+    const takeProfitPips = analysis.take_profit_pips || (stopLossPips * (analysis.risk_reward_ratio || 2));
+
     const stopLoss = direction === 'BUY'
-      ? entryPrice - slDistance
-      : entryPrice + slDistance;
+      ? entryPrice - (stopLossPips * pipSize)
+      : entryPrice + (stopLossPips * pipSize);
 
     const takeProfit = direction === 'BUY'
-      ? entryPrice + tpDistance
-      : entryPrice - tpDistance;
+      ? entryPrice + (takeProfitPips * pipSize)
+      : entryPrice - (takeProfitPips * pipSize);
 
-    const tp1 = takeProfit;
-    const stopLossPips = 30;
-    const takeProfitPips = 60;
+    const tp1 = direction === 'BUY'
+      ? entryPrice + (takeProfitPips * pipSize * 0.4)
+      : entryPrice - (takeProfitPips * pipSize * 0.4);
+
+    const tp2 = direction === 'BUY'
+      ? entryPrice + (takeProfitPips * pipSize * 0.7)
+      : entryPrice - (takeProfitPips * pipSize * 0.7);
+
+    const tp3 = takeProfit;
 
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + getSignalExpiry(timeframe));
@@ -151,8 +161,8 @@ Provide a complete trading signal with entry, stop loss, and take profit levels.
       stop_loss: stopLoss,
       take_profit: takeProfit,
       tp1,
-      tp2: null as number | null,
-      tp3: null as number | null,
+      tp2,
+      tp3,
       pip_stop_loss: stopLossPips,
       pip_take_profit: takeProfitPips,
       risk_reward_ratio: analysis.risk_reward_ratio || Math.round((takeProfitPips / stopLossPips) * 10) / 10,
@@ -229,35 +239,38 @@ function generateMarketData(symbol: string): MarketData {
 function getBasePrice(symbol: string): number {
   const prices: Record<string, number> = {
     'R_10': 3500,
+    'R_25': 2800,
     'R_50': 1900,
+    'R_75': 900000,
     'R_100': 4500,
     '1HZ10V': 3500,
-    '1HZ30V': 2600,
+    '1HZ25V': 2800,
     '1HZ50V': 1900,
-    '1HZ90V': 5000,
+    '1HZ75V': 900000,
     '1HZ100V': 4500,
     '1HZ200V': 7500,
     '1HZ300V': 11000,
     'STPIDX': 25000,
-    'stpRNG': 25000,
-    'JD25': 2800,
   };
   return prices[symbol] || 1000;
 }
 
 function getVolatilityLevel(symbol: string): number {
-  if (symbol.includes('300')) return 300;
-  if (symbol.includes('200')) return 200;
-  if (symbol.includes('100')) return 100;
-  if (symbol.includes('90')) return 90;
-  if (symbol.includes('75')) return 75;
-  if (symbol.includes('50')) return 50;
-  if (symbol.includes('30')) return 30;
-  if (symbol.includes('25')) return 25;
   if (symbol.includes('10')) return 10;
-  if (symbol === 'STPIDX' || symbol === 'stpRNG') return 5;
-  if (symbol.startsWith('JD')) return 25;
+  if (symbol.includes('25')) return 25;
+  if (symbol.includes('50')) return 50;
+  if (symbol.includes('75')) return 75;
+  if (symbol.includes('100')) return 100;
+  if (symbol.includes('200')) return 200;
+  if (symbol.includes('300')) return 300;
+  if (symbol === 'STPIDX') return 5;
   return 15;
+}
+
+function getPipSize(symbol: string): number {
+  if (symbol.includes('R_75') || symbol.includes('1HZ75V')) return 100;
+  if (symbol === 'STPIDX') return 10;
+  return 1;
 }
 
 function getStopLossPips(symbol: string, volatility: number): number {
@@ -274,8 +287,7 @@ function getStopLossPips(symbol: string, volatility: number): number {
   if (symbol.includes('R_100') || symbol.includes('200') || symbol.includes('300')) {
     return Math.max(120, Math.floor(baseStopLoss * 4));
   }
-  if (symbol === 'STPIDX' || symbol === 'stpRNG') return Math.max(50, Math.floor(baseStopLoss * 2));
-  if (symbol.startsWith('JD')) return Math.max(60, Math.floor(baseStopLoss * 2.5));
+  if (symbol === 'STPIDX') return Math.max(50, Math.floor(baseStopLoss * 2));
 
   return Math.max(50, Math.floor(baseStopLoss));
 }
@@ -283,19 +295,18 @@ function getStopLossPips(symbol: string, volatility: number): number {
 function getMT5Symbol(symbol: string): string {
   const mapping: Record<string, string> = {
     'R_10': 'Volatility 10 Index',
+    'R_25': 'Volatility 25 Index',
     'R_50': 'Volatility 50 Index',
+    'R_75': 'Volatility 75 Index',
     'R_100': 'Volatility 100 Index',
     '1HZ10V': 'Volatility 10 (1s) Index',
-    '1HZ30V': 'Volatility 30 (1s) Index',
+    '1HZ25V': 'Volatility 25 (1s) Index',
     '1HZ50V': 'Volatility 50 (1s) Index',
     '1HZ75V': 'Volatility 75 (1s) Index',
-    '1HZ90V': 'Volatility 90 (1s) Index',
     '1HZ100V': 'Volatility 100 (1s) Index',
     '1HZ200V': 'Volatility 200 (1s) Index',
     '1HZ300V': 'Volatility 300 (1s) Index',
     'STPIDX': 'Step Index',
-    'stpRNG': 'Step Index',
-    'JD25': 'Jump 25 Index',
   };
   return mapping[symbol] || symbol;
 }
