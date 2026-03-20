@@ -87,20 +87,32 @@ export function VerifyEmail() {
     setResending(true);
     setMessage(null);
     try {
-      // Fetch a fresh session token in case the stored one is stale/expired.
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      // Fetch a fresh session token if available, but don't block resend on JWT availability.
+      const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData?.session?.access_token;
-      if (sessionErr || !accessToken) {
-        throw new Error('Missing or expired session. Please sign in again.');
+
+      let emailToSend = profile?.email || user?.email || '';
+      if (!emailToSend && user?.id) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('email')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (!error && data?.email) {
+          emailToSend = data.email;
+        }
+      }
+      if (!emailToSend) {
+        throw new Error('Missing email address for verification resend. Please sign out and sign in again.');
       }
 
       const response = await fetch(SEND_ENDPOINT, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ email: emailToSend }),
       });
 
       const rawText = await response.text().catch(() => '');
@@ -119,7 +131,9 @@ export function VerifyEmail() {
         throw new Error(`${msg}${detail ? detail : ''}`);
       }
 
-      if (data?.already_verified) {
+      if (data?.message) {
+        setMessage({ type: 'success', text: String(data.message) });
+      } else if (data?.already_verified) {
         setMessage({ type: 'success', text: 'Email is already verified. No verification email was needed.' });
       } else {
         setMessage({ type: 'success', text: `Verification email sent to ${user?.email || 'your inbox'}.` });

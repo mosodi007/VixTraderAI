@@ -55,7 +55,7 @@ export function Login() {
                 Authorization: `Bearer ${accessToken}`,
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({}),
+              body: JSON.stringify({ email }),
             },
           );
 

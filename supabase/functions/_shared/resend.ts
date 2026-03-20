@@ -299,7 +299,7 @@ export async function sendEmailVerificationEmail(
   options: SendEmailVerificationOptions,
 ): Promise<{ id?: string; error?: string }> {
   const apiKey = options.apiKey ?? Deno.env.get('RESEND_API_KEY');
-  const from = options.from ?? Deno.env.get('RESEND_FROM') ?? 'VixAI <support@vixai.trade>';
+  const from = options.from ?? Deno.env.get('RESEND_FROM') ?? 'VixAI <verify@vixai.trade>';
 
   if (!apiKey || !options.to) {
     if (!apiKey) console.warn('[Resend] RESEND_API_KEY not set; skipping email.');
