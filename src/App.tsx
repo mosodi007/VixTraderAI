@@ -10,22 +10,50 @@ import { Performance } from './pages/Performance';
 import { Settings } from './pages/Settings';
 import { Debug } from './pages/Debug';
 import { LiveAnalysis } from './pages/LiveAnalysis';
+import { TermsOfService } from './pages/TermsOfService';
+import { PrivacyPolicy } from './pages/PrivacyPolicy';
+import { VerifyEmail } from './pages/VerifyEmail';
 
 function AppRoutes() {
-  const { user, loading } = useAuth();
-  const [currentPage, setCurrentPage] = useState<'home' | 'signals' | 'past-signals' | 'performance' | 'settings' | 'debug' | 'live-analysis'>('home');
+  const { user, loading, profile } = useAuth();
+  const isEmailConfirmed = !!profile?.email_verified_at;
+  const [currentPage, setCurrentPage] = useState<
+    | 'home'
+    | 'signals'
+    | 'past-signals'
+    | 'performance'
+    | 'settings'
+    | 'debug'
+    | 'live-analysis'
+    | 'terms'
+    | 'privacy'
+    | 'verify-email'
+  >('home');
   const [authHash, setAuthHash] = useState(() => window.location.hash.slice(1));
+  const authHashBase = authHash.split('?')[0];
 
   useEffect(() => {
     const handleHashChange = () => {
       let hash = window.location.hash.slice(1);
+      const base = hash.split('?')[0];
       setAuthHash(hash);
       if (hash === 'create-mt5') {
         window.location.hash = 'settings';
         hash = 'settings';
       }
-      if (hash === 'signals' || hash === 'past-signals' || hash === 'performance' || hash === 'settings' || hash === 'home' || hash === 'debug' || hash === 'live-analysis') {
-        setCurrentPage(hash);
+      if (
+        base === 'signals' ||
+        base === 'past-signals' ||
+        base === 'performance' ||
+        base === 'settings' ||
+        base === 'home' ||
+        base === 'debug' ||
+        base === 'live-analysis' ||
+        base === 'terms' ||
+        base === 'privacy' ||
+        base === 'verify-email'
+      ) {
+        setCurrentPage(base as any);
       }
     };
 
@@ -45,12 +73,35 @@ function AppRoutes() {
     );
   }
 
+  // Hard gate: users can't access the dashboard until their email is confirmed.
+  // We do this at the app/router level so the VerifyEmail screen always appears.
+  if (user && !isEmailConfirmed) {
+    // Allow navigation away from the verification screen (e.g. "Back to login" or "#home")
+    // while still preventing access to any authenticated dashboard views.
+    if (authHashBase === 'login' || authHashBase === 'signup') return <Login />;
+    if (authHashBase === 'terms') return <TermsOfService />;
+    if (authHashBase === 'privacy') return <PrivacyPolicy />;
+    if (authHashBase === 'home' || authHashBase === '') return <Landing />;
+
+    if (authHashBase !== 'verify-email') window.location.hash = 'verify-email';
+    return <VerifyEmail />;
+  }
+
   if (!user) {
-    if (authHash === 'login' || authHash === 'signup') return <Login />;
+    if (authHashBase === 'login' || authHashBase === 'signup') return <Login />;
+    if (authHashBase === 'terms') return <TermsOfService />;
+    if (authHashBase === 'privacy') return <PrivacyPolicy />;
+    if (authHashBase === 'verify-email') return <VerifyEmail />;
     return <Landing />;
   }
 
   switch (currentPage) {
+    case 'terms':
+      return <TermsOfService />;
+    case 'privacy':
+      return <PrivacyPolicy />;
+    case 'verify-email':
+      return <VerifyEmail />;
     case 'signals':
       return <Signals />;
     case 'past-signals':

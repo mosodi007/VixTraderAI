@@ -19,6 +19,7 @@ interface PastSignal {
   order_type: string;
   confidence: number;
   confidence_percentage: number | null;
+  trigger_count?: number | null;
   outcome: string | null;
   accuracy_percentage: number | null;
   created_at: string;
@@ -265,6 +266,14 @@ export function PastSignals() {
                             {signal.stop_loss.toFixed(5)}
                           </dd>
                         </div>
+                        <div>
+                          <dt className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                            Trigger
+                          </dt>
+                          <dd className="font-mono text-slate-900 dark:text-white text-xs sm:text-sm mt-0.5 break-all">
+                            {signal.trigger_count == null ? '—' : signal.trigger_count}
+                          </dd>
+                        </div>
                         <div className="col-span-2 sm:col-span-1">
                           <dt className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                             TP
@@ -316,6 +325,9 @@ export function PastSignals() {
                         </th>
                         <th className="text-center px-4 xl:px-6 py-3 xl:py-4 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
                           Outcome
+                        </th>
+                        <th className="text-center px-4 xl:px-6 py-3 xl:py-4 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                          Trigger
                         </th>
                         <th className="text-center px-4 xl:px-6 py-3 xl:py-4 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
                           Opened
@@ -385,6 +397,11 @@ export function PastSignals() {
                           </td>
                           <td className="px-4 xl:px-6 py-3 xl:py-4 text-center">
                             {getOutcomeBadge(signal.outcome)}
+                          </td>
+                          <td className="px-4 xl:px-6 py-3 xl:py-4 text-center">
+                            <span className="text-sm text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                              {signal.trigger_count == null ? '—' : signal.trigger_count}
+                            </span>
                           </td>
                           <td className="px-4 xl:px-6 py-3 xl:py-4 text-center">
                             <span className="text-sm text-slate-700 dark:text-slate-300 whitespace-nowrap">

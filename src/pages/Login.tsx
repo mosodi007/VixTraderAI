@@ -4,6 +4,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import logoLight from '../assets/Vixai-logo.png';
 import logoDark from '../assets/Vixai-logo-dark.png';
 import { Eye, EyeOff } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 export function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
@@ -34,8 +35,40 @@ export function Login() {
 
     try {
       if (isSignUp) {
-        const { error } = await signUp(email, password, fullName);
-        if (error) throw error;
+        const result = await signUp(email, password, fullName);
+        if (result.error) throw result.error;
+
+        // Resend-based verification: send email immediately after sign-up.
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+
+        if (!accessToken) {
+          throw new Error('Unable to send verification email (missing session). Please sign in again.');
+        }
+
+        try {
+          const response = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-email-verification`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({}),
+            },
+          );
+
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data?.error || data?.message || 'Failed to send verification email.');
+          }
+        } catch (sendErr: any) {
+          // Still route to verify screen; the user can resend from there.
+          setError(sendErr?.message || 'Verification email could not be sent automatically.');
+        }
+
+        window.location.hash = 'verify-email';
       } else {
         const { error } = await signIn(email, password);
         if (error) throw error;
@@ -154,6 +187,32 @@ export function Login() {
             >
               {loading ? 'Please wait...' : isSignUp ? 'Sign up' : 'Sign In'}
             </button>
+
+            {!isSignUp ? (
+              <p className="text-center text-xs text-slate-600 dark:text-slate-400 mt-2">
+                By signing in, you agree to our{' '}
+                <a href="#terms" className="underline">
+                  Terms
+                </a>{' '}
+                and{' '}
+                <a href="#privacy" className="underline">
+                  Privacy Policy
+                </a>
+                .
+              </p>
+            ) : (
+              <p className="text-center text-xs text-slate-600 dark:text-slate-400 mt-2">
+                By signing up, you agree to our{' '}
+                <a href="#terms" className="underline">
+                  Terms
+                </a>{' '}
+                and{' '}
+                <a href="#privacy" className="underline">
+                  Privacy Policy
+                </a>
+                .
+              </p>
+            )}
           </form>
 
           {isSignUp && (

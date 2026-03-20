@@ -4,6 +4,12 @@
  * Set RESEND_API_KEY and RESEND_FROM in Supabase Edge Function secrets.
  */
 
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
+// Cursor's TS diagnostics sometimes don't know about the Edge runtime globals.
+// This keeps the linter from flagging `Deno.*` usages in this shared file.
+declare const Deno: any;
+
 const RESEND_API = "https://api.resend.com/emails";
 
 /**
@@ -240,6 +246,88 @@ export async function sendMt5VerificationEmail(
   if (!res.ok) {
     const err = (data as { message?: string }).message ?? res.statusText;
     console.error("[Resend] MT5 status email failed:", res.status, err);
+    return { error: err };
+  }
+
+  const id = (data as { id?: string }).id;
+  return { id };
+}
+
+export interface SendEmailVerificationOptions {
+  to: string;
+  token: string;
+  expiresInMinutes?: number;
+  from?: string;
+  apiKey?: string;
+}
+
+function buildEmailVerificationHtml(opts: SendEmailVerificationOptions): string {
+  const expiresMins = opts.expiresInMinutes ?? 5;
+  const verifyUrl = `https://vixai.trade/#verify-email?token=${encodeURIComponent(opts.token)}`;
+
+  return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family: system-ui, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; color: #0f172a;">
+  <h2 style="margin: 0 0 8px;">Verify your email</h2>
+  <p style="margin: 0 0 18px; color: #64748b; font-size: 14px;">
+    We sent you this email because you created an account on Vixai.trade.
+    This verification link expires in <strong>${expiresMins} minutes</strong>.
+  </p>
+
+  <div style="padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;">
+    <a href="${verifyUrl}"
+       style="display:inline-block; background:#059669; color:#fff; text-decoration:none; font-weight:700; padding:12px 18px; border-radius:10px;">
+      Verify your email
+    </a>
+  </div>
+
+  <p style="margin-top: 16px; font-size: 12px; color: #94a3b8;">
+    If you didn’t create an account, you can ignore this email.
+  </p>
+
+  <p style="margin-top: 16px; font-size: 12px; color: #94a3b8;">
+    Need help? Email <a href="mailto:support@vixai.trade">support@vixai.trade</a>.
+  </p>
+</body>
+</html>
+`.trim();
+}
+
+export async function sendEmailVerificationEmail(
+  options: SendEmailVerificationOptions,
+): Promise<{ id?: string; error?: string }> {
+  const apiKey = options.apiKey ?? Deno.env.get('RESEND_API_KEY');
+  const from = options.from ?? Deno.env.get('RESEND_FROM') ?? 'VixAI <support@vixai.trade>';
+
+  if (!apiKey || !options.to) {
+    if (!apiKey) console.warn('[Resend] RESEND_API_KEY not set; skipping email.');
+    return { error: !apiKey ? 'RESEND_API_KEY not set' : 'Missing recipient email' };
+  }
+
+  const expiresInMinutes = options.expiresInMinutes ?? 5;
+  const subject = `Verify your Vixai.trade email (expires in ${expiresInMinutes} min)`;
+  const html = buildEmailVerificationHtml(options);
+
+  const res = await fetch(RESEND_API, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      from,
+      to: [options.to],
+      subject,
+      html,
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = (data as { message?: string }).message ?? res.statusText;
+    console.error('[Resend] Email verification send failed:', res.status, err);
     return { error: err };
   }
 

@@ -9,6 +9,8 @@ export type Profile = {
   email: string;
   full_name: string | null;
   trading_mode: TradingMode;
+  email_verified_at?: string | null;
+  email_verification_expires_at?: string | null;
 };
 
 interface AuthContextType {
@@ -18,7 +20,11 @@ interface AuthContextType {
   tradingMode: TradingMode;
   hasVerifiedLiveMt5: boolean;
   loading: boolean;
-  signUp: (email: string, password: string, fullName?: string) => Promise<{ error: Error | null }>;
+  signUp: (
+    email: string,
+    password: string,
+    fullName?: string,
+  ) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   setTradingMode: (mode: TradingMode) => Promise<{ error: Error | null }>;
@@ -44,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: prof } = await supabase
       .from('profiles')
-      .select('id,email,full_name,trading_mode')
+      .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at')
       .eq('id', nextUser.id)
       .maybeSingle();
 
@@ -55,6 +61,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: nextUser.email ?? '',
         full_name: null,
         trading_mode: 'demo',
+        email_verified_at: null,
+        email_verification_expires_at: null,
       };
       setProfile(fallback);
       setTradingModeState(fallback.trading_mode);
@@ -65,6 +73,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: prof.email ?? nextUser.email ?? '',
         full_name: (prof as any).full_name ?? null,
         trading_mode: mode,
+        email_verified_at: (prof as any).email_verified_at ?? null,
+        email_verification_expires_at: (prof as any).email_verification_expires_at ?? null,
       };
       setProfile(nextProfile);
       setTradingModeState(nextProfile.trading_mode);
@@ -105,6 +115,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          // Avoid using '#...' here because Supabase confirmation links may include auth tokens in the hash.
+          // The client-side app will route to '#verify-email' after a successful sign-up.
+          emailRedirectTo: window.location.origin,
+        },
       });
 
       if (error) throw error;
@@ -117,6 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: data.user.email!,
             full_name: fullName || null,
             trading_mode: 'demo',
+            email_verified_at: null,
           });
 
         if (profileError) throw profileError;

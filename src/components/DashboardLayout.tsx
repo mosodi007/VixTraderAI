@@ -22,7 +22,7 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
   const navigation = [
     { name: 'Dashboard', icon: Home, page: 'home' },
     { name: 'Live Signals', icon: TrendingUp, page: 'signals' },
-    // { name: 'Past Signals', icon: History, page: 'past-signals' },
+    { name: 'Past Signals', icon: History, page: 'past-signals' },
     { name: 'Performance', icon: BarChart3, page: 'performance' },
     { name: 'Settings', icon: Settings, page: 'settings' },
   ];
