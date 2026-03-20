@@ -1,3 +1,4 @@
+// @ts-nocheck
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -190,72 +191,12 @@ Deno.serve(async (req: Request) => {
     );
 
     if (!acct || !acct.user_id) {
-      // Demo mode: allow unregistered demo accounts to run without any DB auth.
-      if (ea_mode === "demo") {
-        const { data: signals, error: sigErr } = await supabase
-          .from("signals")
-          .select("id, symbol, mt5_symbol, direction, entry_price, stop_loss, take_profit, tp1, created_at, is_active, signal_status")
-          .eq("is_active", true)
-          .eq("signal_status", "ACTIVE")
-          .order("created_at", { ascending: false })
-          .limit(50);
-        if (sigErr) throw sigErr;
-
-        const sigList = signals || [];
-        const instructions: any[] = [];
-        for (const s of sigList) {
-          if (!s.symbol || !s.direction) continue;
-          const symbolCode = String(s.symbol || "").trim();
-          const tp = (s as any).tp1 ?? (s as any).take_profit;
-          const sl = Number((s as any).stop_loss);
-          const tpVal = Number(tp);
-          if (!Number.isFinite(sl) || !Number.isFinite(tpVal) || sl <= 0 || tpVal <= 0) continue;
-
-          const rawSymbol = symbolCode;
-          const symbolForEA =
-            ((s as any).mt5_symbol && String((s as any).mt5_symbol).trim()) ||
-            DERIV_TO_MT5_SYMBOL[rawSymbol] ||
-            rawSymbol;
-
-          instructions.push({
-            signal_id: String((s as any).id),
-            symbol: symbolForEA,
-            symbol_code: rawSymbol,
-            direction: (s as any).direction,
-            entry_type: "market",
-            entry_price: Number((s as any).entry_price) || 0,
-            stop_loss: sl,
-            take_profit: tpVal,
-            lot_mode: "fixed",
-            fixed_lot: 0.01,
-            percent: 0,
-            percent_formula: "lots_per_1000",
-            magic: 123456,
-            comment: `VIX_AI:${String((s as any).id)}`,
-          });
-          if (instructions.length >= max) break;
-        }
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            instructions,
-            demo_unregistered: true,
-            debug: {
-              active_signals_count: sigList.length,
-              instructions_count: instructions.length,
-            },
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-
       return new Response(
         JSON.stringify({
           success: false,
-          error: "MT5 account not found. Add and verify this MT5 account in the app first.",
+          error: "Unauthorized Account: Go to https://vixai.trade to add this account",
         }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 

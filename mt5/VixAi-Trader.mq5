@@ -558,7 +558,11 @@ void PollBackend()
   if(!HttpPost(ApiUrlInstructions, body, resp, st)) return;
   if(st==401)
   {
-    Log("Unauthorized: this MT5 login is not an approved DEMO account in VixAI. Disabling EA.");
+    string errMsg="";
+    if(!ExtractStringField(resp, "error", errMsg) || StringLen(errMsg)==0)
+      errMsg="Unauthorized";
+    Log(errMsg);
+    Alert(errMsg);
     gUnauthorized = true;
     EventKillTimer();
     return;

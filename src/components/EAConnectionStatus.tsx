@@ -157,23 +157,43 @@ export function EAConnectionStatus({ userId, tradingMode }: EAConnectionStatusPr
           <div className="mt-5 pt-5 border-t border-slate-200 dark:border-slate-700">
             <p className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Download EA</p>
             {tradingMode === 'demo' ? (
-              <a
-                href="/VixAi-Trader-Demo.mq5"
-                download
-                className="inline-flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-medium rounded-lg transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                Download Demo EA
-              </a>
+              <div className="inline-flex flex-col items-center gap-2">
+                <a
+                  href="/VixAi-Trader-Demo.ex5"
+                  download
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-medium rounded-lg transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Demo EA
+                </a>
+                <a
+                  href="/EA-Instructions.pdf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-medium rounded-lg transition-colors"
+                >
+                  EA Instructions
+                </a>
+              </div>
             ) : (
-              <a
-                href="/VixAi-Trader-Live.mq5"
-                download
-                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                Download Live EA
-              </a>
+              <div className="inline-flex flex-col items-center gap-2">
+                <a
+                  href="/VixAi-Trader-Live.ex5"
+                  download
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Live EA
+                </a>
+                <a
+                  href="/EA-Instructions.pdf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-medium rounded-lg transition-colors"
+                >
+                  EA Instructions
+                </a>
+              </div>
             )}
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-3">
               Save this file into <span className="font-mono">MQL5/Experts</span>, then restart MT5 and attach the EA to a chart.
@@ -217,23 +237,43 @@ export function EAConnectionStatus({ userId, tradingMode }: EAConnectionStatusPr
               </p>
             </div>
             {tradingMode === 'demo' ? (
-              <a
-                href="/VixAi-Trader-Demo.mq5"
-                download
-                className="inline-flex items-center gap-2 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                Demo EA
-              </a>
+              <div className="inline-flex flex-col items-end gap-2">
+                <a
+                  href="/VixAi-Trader-Demo.ex5"
+                  download
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  Demo EA
+                </a>
+                <a
+                  href="/EA-Instructions.pdf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-900 dark:text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  EA Instructions
+                </a>
+              </div>
             ) : (
-              <a
-                href="/VixAi-Trader-Live.mq5"
-                download
-                className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                Live EA
-              </a>
+              <div className="inline-flex flex-col items-end gap-2">
+                <a
+                  href="/VixAi-Trader-Live.ex5"
+                  download
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <Download className="w-4 h-4" />
+                  Live EA
+                </a>
+                <a
+                  href="/EA-Instructions.pdf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-3 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-900 dark:text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  EA Instructions
+                </a>
+              </div>
             )}
           </div>
         </div>

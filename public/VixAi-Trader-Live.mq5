@@ -3,18 +3,24 @@
 //| Live-only EA build                                               |
 //+------------------------------------------------------------------+
 #property strict
+#property copyright "Copyright 2026, Vix AI,"
+#property link      "https://vixai.trade"
+#property version   "1.00"
+#property description "VixAI Copy Trader"
+#property description "Advanced AI Copy Trading & Signal Platform for Deriv Volatility Index"
 
 #include <Trade/Trade.mqh>
+
 CTrade trade;
 
 //--- endpoints
-input string ApiUrlInstructions  = "https://qqkhcvkodbogjsbichrw.supabase.co/functions/v1/mt5-get-instructions";
-input string ApiUrlReportTrade   = "https://qqkhcvkodbogjsbichrw.supabase.co/functions/v1/mt5-report-trade";
-input string ApiUrlReportAccount = "https://qqkhcvkodbogjsbichrw.supabase.co/functions/v1/mt5-report-account";
-input string ApiUrlReportPos     = "https://qqkhcvkodbogjsbichrw.supabase.co/functions/v1/mt5-report-positions";
+string ApiUrlInstructions  = "https://qqkhcvkodbogjsbichrw.supabase.co/functions/v1/mt5-get-instructions";
+string ApiUrlReportTrade   = "https://qqkhcvkodbogjsbichrw.supabase.co/functions/v1/mt5-report-trade";
+string ApiUrlReportAccount = "https://qqkhcvkodbogjsbichrw.supabase.co/functions/v1/mt5-report-account";
+string ApiUrlReportPos     = "https://qqkhcvkodbogjsbichrw.supabase.co/functions/v1/mt5-report-positions";
 
 //--- auth (optional on backend; can be left empty while testing)
-input string ApiToken            = "";
+string ApiToken            = "";
 
 //--- timing
 input int    PollIntervalSeconds = 5;   // also used as snapshot interval
@@ -295,6 +301,49 @@ double NormalizeLots(const string symbol, double lots)
   return lots;
 }
 
+// Ensure SL/TP satisfy broker minimum stop distance and side rules.
+bool PrepareValidStops(const string symbol, const string direction, double &sl, double &tp)
+{
+  double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
+  double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+  double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+  int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+  int stopsLevel = (int)SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+  int freezeLevel = (int)SymbolInfoInteger(symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+
+  if(point <= 0.0) point = 0.00001;
+  double minPoints = MathMax((double)stopsLevel, (double)freezeLevel);
+  if(minPoints < 1.0) minPoints = 1.0; // keep a tiny safety buffer even when broker returns 0
+  double minDist = minPoints * point;
+
+  if(direction == "BUY")
+  {
+    double maxSl = bid - minDist;
+    double minTp = ask + minDist;
+    if(sl <= 0.0 || sl >= maxSl) sl = maxSl;
+    if(tp <= 0.0 || tp <= minTp) tp = minTp;
+  }
+  else if(direction == "SELL")
+  {
+    double minSl = ask + minDist;
+    double maxTp = bid - minDist;
+    if(sl <= 0.0 || sl <= minSl) sl = minSl;
+    if(tp <= 0.0 || tp >= maxTp) tp = maxTp;
+  }
+  else
+  {
+    return false;
+  }
+
+  sl = NormalizeDouble(sl, digits);
+  tp = NormalizeDouble(tp, digits);
+
+  // Final guard after normalization.
+  if(direction == "BUY")
+    return (sl < bid && tp > ask);
+  return (sl > ask && tp < bid);
+}
+
 void ReportTrade(const string signal_id, const long ticket, const string symbol, const string direction,
                  const string status, const double entry_price, const double sl, const double tp,
                  const double lots, const double profit, const double exit_price, const string error_message)
@@ -487,9 +536,16 @@ void ExecuteInstruction(const string obj)
   double lots = ComputeLotsFromInstruction(symbol, lot_mode, fixed_lot, percent, percent_formula);
   lots = NormalizeLots(symbol, lots);
 
-  int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-  stop_loss = NormalizeDouble(stop_loss, digits);
-  take_profit = NormalizeDouble(take_profit, digits);
+  double slRaw = stop_loss;
+  double tpRaw = take_profit;
+  if(!PrepareValidStops(symbol, direction, stop_loss, take_profit))
+  {
+    Log("Invalid SL/TP after broker normalization for " + symbol + " signal=" + signal_id);
+    return;
+  }
+  if(MathAbs(stop_loss - slRaw) > 0.0 || MathAbs(take_profit - tpRaw) > 0.0)
+    Log("Adjusted stops for broker rules: SL " + DoubleToString(slRaw, 5) + " -> " + DoubleToString(stop_loss, 5) +
+        ", TP " + DoubleToString(tpRaw, 5) + " -> " + DoubleToString(take_profit, 5));
 
   trade.SetExpertMagicNumber((int)magic_num);
   trade.SetDeviationInPoints(SlippagePoints);
@@ -539,7 +595,11 @@ void PollBackend()
   if(!HttpPost(ApiUrlInstructions, body, resp, st)) return;
   if(st==401)
   {
-    Log("Unauthorized: this MT5 login is not an approved LIVE account in VixAI. Disabling EA.");
+    string errMsg="";
+    if(!ExtractStringField(resp, "error", errMsg) || StringLen(errMsg)==0)
+      errMsg="Unauthorized";
+    Log(errMsg);
+    Alert(errMsg);
     gUnauthorized = true;
     EventKillTimer();
     return;
@@ -559,11 +619,6 @@ void PollBackend()
 int OnInit()
 {
   Log("Init");
-  if(!IsLiveAccount())
-  {
-    Log("Unauthorized: VixAi-Trader-Live.mq5 is LIVE-only. Attach it to a LIVE account.");
-    return INIT_FAILED;
-  }
   ArrayResize(executedSignalIds, 0);
   ArrayResize(mapTickets, 0);
   ArrayResize(mapSignalIds, 0);
