@@ -142,6 +142,9 @@ export function Settings() {
   const [minAiConfidencePercent, setMinAiConfidencePercent] = useState<number>(50);
   const [minAiConfidenceLoading, setMinAiConfidenceLoading] = useState(false);
   const [minAiConfidenceMessage, setMinAiConfidenceMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [emailSignalsEnabled, setEmailSignalsEnabled] = useState(false);
+  const [emailSignalsLoading, setEmailSignalsLoading] = useState(false);
+  const [emailSignalsMessage, setEmailSignalsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     loadDemoAndLiveAccounts();
@@ -207,12 +210,38 @@ export function Settings() {
     if (!user) return;
     const { data, error } = await supabase
       .from('profiles')
-      .select('ai_min_confidence_percent')
+      .select('ai_min_confidence_percent,email_signals_enabled')
       .eq('id', user.id)
       .maybeSingle();
     if (error) return;
     const v = Number((data as any)?.ai_min_confidence_percent);
     if (Number.isFinite(v)) setMinAiConfidencePercent(Math.max(0, Math.min(100, Math.round(v))));
+    setEmailSignalsEnabled((data as any)?.email_signals_enabled === true);
+  };
+
+  const handleSaveEmailSignals = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setEmailSignalsLoading(true);
+    setEmailSignalsMessage(null);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          email_signals_enabled: emailSignalsEnabled,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+      if (error) throw error;
+      setEmailSignalsMessage({
+        type: 'success',
+        text: emailSignalsEnabled ? 'Email signals enabled.' : 'Email signals disabled.',
+      });
+    } catch (error: any) {
+      setEmailSignalsMessage({ type: 'error', text: error.message || 'Failed to save email signal setting' });
+    } finally {
+      setEmailSignalsLoading(false);
+    }
   };
 
   const accountsForMode = mt5Accounts.filter((a) =>
@@ -867,6 +896,51 @@ export function Settings() {
                 {minAiConfidenceLoading ? 'Saving...' : 'Save AI Confidence Settings'}
               </button>
             </form>
+
+            <div className="mt-8 pt-8 border-t border-slate-200 dark:border-slate-700">
+              <h4 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Email signals</h4>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
+                Receive email alerts when new live signals are generated.
+              </p>
+
+              {emailSignalsMessage && (
+                <div className={`flex items-center gap-3 p-4 rounded-lg mb-4 ${
+                  emailSignalsMessage.type === 'success'
+                    ? 'bg-emerald-500/10 border border-emerald-500/30'
+                    : 'bg-red-500/10 border border-red-500/30'
+                }`}>
+                  {emailSignalsMessage.type === 'success' ? (
+                    <CheckCircle className="w-5 h-5 text-emerald-400" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-red-400" />
+                  )}
+                  <p className={`text-sm ${emailSignalsMessage.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {emailSignalsMessage.text}
+                  </p>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveEmailSignals} className="space-y-4">
+                <label className="inline-flex items-center gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={emailSignalsEnabled}
+                    onChange={(e) => setEmailSignalsEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">Enable signal emails</span>
+                </label>
+
+                <button
+                  type="submit"
+                  disabled={emailSignalsLoading}
+                  className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                >
+                  <Save className="w-5 h-5" />
+                  {emailSignalsLoading ? 'Saving...' : 'Save Email Settings'}
+                </button>
+              </form>
+            </div>
           </div>
 
           <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">

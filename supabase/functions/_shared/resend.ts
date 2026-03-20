@@ -38,11 +38,13 @@ export async function getSignalNotificationEmails(
 
   const { data: profiles } = await supabase
     .from("profiles")
-    .select("email,ai_min_confidence_percent")
+    .select("email,ai_min_confidence_percent,email_signals_enabled")
     .in("id", userIds);
 
   return (profiles || [])
-    .filter((p: { email: string; ai_min_confidence_percent?: number | null }) => {
+    .filter((p: { email: string; ai_min_confidence_percent?: number | null; email_signals_enabled?: boolean | null }) => {
+      // Email notifications are opt-in; default disabled.
+      if (p.email_signals_enabled !== true) return false;
       const rawMin = p.ai_min_confidence_percent;
       const minConf = rawMin == null ? 20 : Number(rawMin);
       // Ensure legacy/invalid values can't effectively reduce the threshold below 20.

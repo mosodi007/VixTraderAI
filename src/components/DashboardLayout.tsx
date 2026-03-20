@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, History, Sun, Moon, Bell, BellRing, MessageCircle } from 'lucide-react';
+import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, Sun, Moon, Bell, BellRing, MessageCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { playNewSignalAlert, unlockAudio } from '../lib/soundAlert';
 import logoLight from '../assets/Vixai-logo.png';
@@ -190,6 +190,34 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
                   <Wifi className="w-4 h-4 text-emerald-500" />
                   <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Connected</span>
                 </div>
+              </div>
+            </div>
+            <div className="sm:hidden px-6 pb-3">
+              <div className="inline-flex items-center rounded-full border border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/30 p-1">
+                <button
+                  type="button"
+                  onClick={() => setTradingMode('demo')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                    tradingMode === 'demo'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                  }`}
+                  aria-pressed={tradingMode === 'demo'}
+                >
+                  Demo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTradingMode('live')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                    tradingMode === 'live'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                  }`}
+                  aria-pressed={tradingMode === 'live'}
+                >
+                  Live
+                </button>
               </div>
             </div>
           </header>
