@@ -3,12 +3,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import logoLight from '../assets/Vixai-logo.png';
 import logoDark from '../assets/Vixai-logo-dark.png';
+import { Eye, EyeOff } from 'lucide-react';
 
 export function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
@@ -53,11 +55,11 @@ export function Login() {
             <img
               src={theme === 'dark' ? logoDark : logoLight}
               alt="VixAI"
-              className="h-16 w-16 rounded-2xl object-contain"
+              className="h-12 w-auto object-contain"
             />
           </div>
-          <h1 className="text-3xl font-bold text-black dark:text-white mb-2">VixAI Trader</h1>
-          <p className="text-slate-600 dark:text-slate-400">AI-powered copy trading platform</p>
+          {/* <h1 className="text-3xl font-bold text-black dark:text-white mb-2">VixAI Trader</h1> */}
+          <p className="text-slate-600 dark:text-slate-400">AI-powered copy trading & signals platform for Volatility Indices</p>
         </div>
 
         <div className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-8 border border-slate-300 dark:border-slate-700">
@@ -118,15 +120,25 @@ export function Login() {
               <label className="block text-sm font-medium text-black dark:text-slate-300 mb-2">
                 Password
               </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-                className="w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-black dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  className="w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-black dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent pr-12"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -147,7 +159,7 @@ export function Login() {
           {isSignUp && (
             <div className="mt-6 p-4 bg-emerald-600/10 border border-emerald-600/30 rounded-lg">
               <p className="text-sm text-emerald-600 dark:text-emerald-400">
-                After signing up, create your Deriv MT5 account on{' '}
+                After signing up, connect or create your Deriv MT5 account on{' '}
                 <a
                   href="https://track.deriv.com/_Yqc93056kqBnhKTx4PKacmNd7ZgqdRLk/143/"
                   target="_blank"
