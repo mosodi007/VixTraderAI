@@ -127,13 +127,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.user) {
         const { error: profileError } = await supabase
           .from('profiles')
-          .insert({
-            id: data.user.id,
-            email: data.user.email!,
-            full_name: fullName || null,
-            trading_mode: 'demo',
-            email_verified_at: null,
-          });
+          .upsert(
+            {
+              id: data.user.id,
+              email: data.user.email!,
+              full_name: fullName || null,
+              trading_mode: 'demo',
+              email_verified_at: null,
+            },
+            { onConflict: 'id' },
+          );
 
         if (profileError) throw profileError;
       }
