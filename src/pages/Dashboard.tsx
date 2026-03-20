@@ -8,6 +8,8 @@ import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 import { EAConnectionStatus } from '../components/EAConnectionStatus';
 import { RecentTradeActivity } from '../components/RecentTradeActivity';
 import { PerformanceMetrics } from '../components/PerformanceMetrics';
+import { AccountLiveMetrics } from '../components/AccountLiveMetrics';
+import { LiveMT5Positions } from '../components/LiveMT5Positions';
 
 export function Dashboard() {
   const { user, tradingMode } = useAuth();
@@ -87,7 +89,7 @@ export function Dashboard() {
         <div className="max-w-6xl mx-auto space-y-6">
           <div>
             <h2 className="text-3xl font-bold text-black dark:text-white mb-2">Welcome Back</h2>
-            <p className="text-slate-600 dark:text-slate-400">Manage your AI-powered trading account</p>
+            {/* <p className="text-slate-600 dark:text-slate-400">Manage your AI-powered trading account</p> */}
           </div>
 
           {!mt5Account ? (
@@ -179,9 +181,11 @@ export function Dashboard() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <EAConnectionStatus userId={user.id} tradingMode={tradingMode} />
                 <PerformanceMetrics userId={user.id} tradingMode={tradingMode} />
+                {/* <AccountLiveMetrics userId={user.id} /> */}
               </div>
 
-              {/* <LiveMT5Positions userId={user.id} /> */}
+
+                {/* <LiveMT5Positions userId={user.id} /> */}
 
               <RecentTradeActivity userId={user.id} tradingMode={tradingMode} />
             </>

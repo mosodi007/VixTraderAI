@@ -30,8 +30,8 @@ export interface SignalDetectionResult {
 
 export class AdvancedSignalDetector {
   private analyzer: TechnicalAnalyzer;
-  private minTriggers: number = 3;
-  private minConfidence: number = 50;
+  private minTriggers: number = 4;
+  private minConfidence: number = 20;
   private minRiskReward: number = 1.5;
 
   constructor(ticks: TickData[]) {

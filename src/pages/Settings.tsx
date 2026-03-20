@@ -8,6 +8,8 @@ import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 
 // Keep in sync with `supabase/functions/auto-generate-signals/index.ts` monitored symbols.
 const SYMBOLS = ['R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ30V', '1HZ75V', '1HZ100V'] as const;
+// Only trade/configure this symbol for now.
+const ACTIVE_LOTS_SYMBOL = '1HZ30V' as (typeof SYMBOLS)[number];
 
 const SYMBOL_NAMES: Record<(typeof SYMBOLS)[number], string> = {
   'R_25': 'Volatility 25 Index',
@@ -349,7 +351,7 @@ export function Settings() {
     setTradeSettingsMessage(null);
 
     try {
-      for (const symbol of SYMBOLS) {
+      for (const symbol of [ACTIVE_LOTS_SYMBOL]) {
         const s = symbolTradeSettings[symbol] ?? { tradeEnabled: true, lotMode: 'fixed' as LotMode, fixedLot: 0.01, percent: 0 };
         const trade_enabled = !!s.tradeEnabled;
         const lot_mode: LotMode = s.lotMode === 'percent_balance' ? 'percent_balance' : 'fixed';
@@ -718,7 +720,7 @@ export function Settings() {
           </div>
           )}
 
-          <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
+          {/* <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-emerald-500" />
               Symbol SL/TP Points
@@ -794,7 +796,7 @@ export function Settings() {
                 {pointsLoading ? 'Saving...' : 'Save Symbol Points'}
               </button>
             </form>
-          </div>
+          </div> */}
 
           <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Trade filters</h3>
@@ -827,7 +829,7 @@ export function Settings() {
                   </label>
                   <input
                     type="range"
-                    min={0}
+                    min={20}
                     max={100}
                     step={1}
                     value={minAiConfidencePercent}
@@ -835,7 +837,7 @@ export function Settings() {
                     className="w-full"
                   />
                   <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    <span>0%</span>
+                    <span>20%</span>
                     <span>100%</span>
                   </div>
                 </div>
@@ -862,7 +864,7 @@ export function Settings() {
                 className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
               >
                 <Save className="w-5 h-5" />
-                {minAiConfidenceLoading ? 'Saving...' : 'Save'}
+                {minAiConfidenceLoading ? 'Saving...' : 'Save AI Confidence Settings'}
               </button>
             </form>
           </div>
@@ -923,14 +925,14 @@ export function Settings() {
                       <thead>
                         <tr className="border-b border-slate-200 dark:border-slate-600">
                           <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Symbol</th>
-                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Enabled</th>
+                          {/* <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Enabled</th> */}
                           <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Lot mode</th>
                           <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Fixed lot</th>
                           <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">% balance</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {SYMBOLS.map((symbol) => {
+                        {[ACTIVE_LOTS_SYMBOL].map((symbol) => {
                           const s = symbolTradeSettings[symbol] ?? { tradeEnabled: true, lotMode: 'fixed' as LotMode, fixedLot: 0.01, percent: 0 };
                           const isPercent = s.lotMode === 'percent_balance';
                           const minLot = SYMBOL_MIN_LOT[symbol] ?? 0;
@@ -942,14 +944,14 @@ export function Settings() {
                                 <div className="font-mono">{symbol}</div>
                                 <div className="text-xs text-slate-600 dark:text-slate-400">{SYMBOL_NAMES[symbol]}</div>
                               </td>
-                              <td className="py-2 px-2">
+                              {/* <td className="py-2 px-2">
                                 <input
                                   type="checkbox"
                                   checked={!!s.tradeEnabled}
                                   onChange={(e) => setTradeSettingForSymbol(symbol, { tradeEnabled: e.target.checked })}
                                   className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
                                 />
-                              </td>
+                              </td> */}
                               <td className="py-2 px-2">
                                 <select
                                   value={s.lotMode}
@@ -1000,7 +1002,7 @@ export function Settings() {
                     className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
                   >
                     <Save className="w-5 h-5" />
-                    {tradeSettingsLoading ? 'Saving...' : 'Save Per-Symbol Settings'}
+                    {tradeSettingsLoading ? 'Saving...' : 'Save Lot Size Settings'}
                   </button>
                 </form>
               </>

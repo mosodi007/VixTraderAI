@@ -38,8 +38,9 @@ export async function getSignalNotificationEmails(
   return (profiles || [])
     .filter((p: { email: string; ai_min_confidence_percent?: number | null }) => {
       const rawMin = p.ai_min_confidence_percent;
-      const minConf = rawMin == null ? 50 : Number(rawMin);
-      const effectiveMin = Number.isFinite(minConf) ? minConf : 50; // default
+      const minConf = rawMin == null ? 20 : Number(rawMin);
+      // Ensure legacy/invalid values can't effectively reduce the threshold below 20.
+      const effectiveMin = Math.max(20, Math.min(100, Number.isFinite(minConf) ? minConf : 20));
       return effectiveMin <= conf;
     })
     .map((p: { email: string }) => p.email)

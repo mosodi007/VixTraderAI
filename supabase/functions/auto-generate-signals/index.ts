@@ -83,7 +83,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // List of symbols to monitor
-    const symbols = ['R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ30V', '1HZ50V', '1HZ75V', '1HZ100V'];
+    const symbols = ['1HZ30V'];
     const timeframe = 'M15';
 
     const results: AutoSignalResult[] = [];

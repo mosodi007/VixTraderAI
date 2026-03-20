@@ -315,10 +315,10 @@ Deno.serve(async (req: Request) => {
     if (profErr) {
       console.warn("[mt5-get-instructions] profiles load failed:", profErr.message);
     }
-    const minConfidencePercent = Math.max(
-      0,
-      Math.min(100, Number((profileRow as any)?.ai_min_confidence_percent) || 50),
-    );
+    const rawMin = (profileRow as any)?.ai_min_confidence_percent;
+    // Clamp to [20, 100] so the EA never uses a threshold below 20.
+    const parsed = rawMin == null ? 20 : Number(rawMin);
+    const minConfidencePercent = Math.max(20, Math.min(100, Number.isFinite(parsed) ? parsed : 20));
 
     // Load per-symbol settings for this mt5_login. Keyed by Deriv symbol code (e.g., "R_50").
     const { data: symbolRows, error: symErr } = await supabase
