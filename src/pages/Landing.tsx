@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import logoLight from '../assets/Vixai-logo.png';
 import logoDark from '../assets/Vixai-logo-dark.png';
@@ -34,6 +35,34 @@ const FaqItem = ({ q, a }: { q: string; a: string }) => (
 
 export function Landing() {
   const { theme } = useTheme();
+
+  useEffect(() => {
+    const scriptId = 'tawk-widget-script';
+    const existing = document.getElementById(scriptId);
+    if (!existing) {
+      const s = document.createElement('script');
+      s.id = scriptId;
+      s.async = true;
+      s.src = 'https://embed.tawk.to/69bd93521f2eee1c3a8ff055/1jk68euv3';
+      s.charset = 'UTF-8';
+      s.setAttribute('crossorigin', '*');
+      document.body.appendChild(s);
+    }
+
+    return () => {
+      const script = document.getElementById(scriptId);
+      if (script?.parentNode) script.parentNode.removeChild(script);
+
+      // Best-effort cleanup so widget is landing-page only.
+      const iframes = Array.from(document.querySelectorAll('iframe'));
+      for (const iframe of iframes) {
+        const src = iframe.getAttribute('src') || '';
+        if (src.includes('tawk.to')) {
+          iframe.parentNode?.removeChild(iframe);
+        }
+      }
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
