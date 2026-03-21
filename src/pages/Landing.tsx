@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import logoLight from '../assets/Vixai-logo.png';
 import logoDark from '../assets/Vixai-logo-dark.png';
-import { CheckCircle2, Zap, LineChart, TrendingUp, Hand, Target, Sun, Moon } from 'lucide-react';
+import dashboardHero from '../assets/Dashboard-Image.png';
+import { CheckCircle2, Zap, LineChart, Sun, Moon } from 'lucide-react';
 
 const FeatureItem = ({ title, description }: { title: string; description: string }) => (
   <div className="flex gap-3">
@@ -102,88 +103,84 @@ export function Landing() {
       </header>
 
       <main>
-        <section className="max-w-6xl mx-auto px-4 pt-14 pb-10">
-          <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
-            <div>
-              <p className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 text-xs text-slate-700 dark:text-slate-300 mb-4">
-                <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                Volatility Index Trading • High Probability Signals
-              </p>
-              <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight">
-                AI Copy Trader & Trading Signals for Volatility Index
-              </h1>
-              <p className="mt-4 text-base text-slate-600 dark:text-slate-400 leading-relaxed">
-                Get AI-generated trade setups and connect your MT5 Expert Advisor to execute trades automatically.
-                Start in demo, tune your risk and filters, then switch to live when you’re ready.
-              </p>
+        <section className="relative overflow-hidden border-b border-slate-200/80 dark:border-slate-800/80">
+          <div
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(16,185,129,0.18),transparent)] dark:bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(16,185,129,0.12),transparent)]"
+            aria-hidden
+          />
+          <div className="relative max-w-5xl mx-auto px-4 pt-12 pb-16 md:pt-16 md:pb-20 text-center">
+            <p className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-slate-200/90 dark:border-slate-700/90 bg-white/80 dark:bg-slate-900/60 backdrop-blur-sm text-xs font-medium text-slate-700 dark:text-slate-300 shadow-sm">
+              <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              Volatility indices • Deriv MT5 • AI-assisted execution
+            </p>
 
-              <div className="mt-7 flex flex-wrap gap-3">
-                <a
-                  href="#signup"
-                  className="inline-flex items-center gap-2 px-5 py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition-colors"
-                >
-                  Get Started
-                  <LineChart className="w-4 h-4" />
-                </a>
-                <a
-                  href="#login"
-                  className="inline-flex items-center gap-2 px-5 py-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-900 dark:text-white font-semibold transition-colors"
-                >
-                  Log in
-                </a>
-              </div>
+            <h1 className="mt-6 text-4xl sm:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.1]">
+              The #1 AI Copy Trading & Signals Platform
+              <span className="block mt-1 sm:mt-2 bg-gradient-to-r from-emerald-700 to-emerald-500 dark:from-emerald-400 dark:to-emerald-300 bg-clip-text text-transparent">
+              For Volatility Indices
+              </span>
+            </h1>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 p-4">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">Mode</p>
-                  <p className="text-sm font-bold text-slate-900 dark:text-white">Demo → Live</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 p-4">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">Market</p>
-                  <p className="text-sm font-bold text-slate-900 dark:text-white">Deriv MT5</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/40 p-4">
-                  <p className="text-xs text-slate-600 dark:text-slate-400">Control</p>
-                  <p className="text-sm font-bold text-slate-900 dark:text-white">Risk filters</p>
+            <p className="mt-5 text-lg sm:text-xl text-slate-600 dark:text-slate-400 leading-relaxed max-w-2xl mx-auto">
+              VixAI uses AI to analyze volatility indices and generate buy/sell signals with a confidence score. Trade automatically with full control over risk and filters.
+            </p>
+
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              <a
+                href="#signup"
+                className="inline-flex items-center justify-center gap-2 min-h-[48px] px-8 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-lg shadow-emerald-600/25 transition-all hover:shadow-emerald-600/35"
+              >
+                Get started free
+                <LineChart className="w-4 h-4 opacity-90" />
+              </a>
+              <a
+                href="#login"
+                className="inline-flex items-center justify-center min-h-[48px] px-8 rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-900 dark:text-white font-semibold transition-colors"
+              >
+                Log in
+              </a>
+            </div>
+
+            {/* <div className="mt-10 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-sm text-slate-600 dark:text-slate-400">
+              <span className="inline-flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                Demo &amp; live modes
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                Real-time EA dashboard
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                Performance at a glance
+              </span>
+            </div> */}
+          </div>
+
+          <div className="relative max-w-6xl mx-auto px-4 pb-16 md:pb-24">
+            <div className="relative mx-auto max-w-5xl">
+              <div
+                className="absolute -inset-4 rounded-[2rem] bg-gradient-to-br from-emerald-500/12 via-transparent to-sky-500/10 blur-2xl dark:from-emerald-500/10 dark:to-sky-500/8"
+                aria-hidden
+              />
+              <div className="relative rounded-2xl border border-slate-200/90 dark:border-slate-700/90 bg-white/50 dark:bg-slate-800/40 p-1.5 sm:p-2 shadow-[0_32px_64px_-12px_rgba(15,23,42,0.25)] dark:shadow-[0_32px_64px_-12px_rgba(0,0,0,0.45)] ring-1 ring-slate-900/5 dark:ring-white/10">
+                <div className="overflow-hidden rounded-[0.9rem] bg-slate-100 dark:bg-slate-900/60">
+                  <img
+                    src={dashboardHero}
+                    alt="VixAI web dashboard with MT5 account status, EA connections, and trading performance; mobile app with trade history"
+                    className="w-full h-auto object-cover object-top block"
+                    width={1200}
+                    height={720}
+                    loading="eager"
+                    decoding="async"
+                  />
                 </div>
               </div>
             </div>
-
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-6">
-              <div className="grid gap-4">
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 p-5 flex gap-3">
-                  <TrendingUp className="w-5 h-5 text-emerald-600 dark:text-emerald-400 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-bold text-slate-900 dark:text-white">High Win Rates</p>
-                    <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                      Our strategy is designed to maximize win rates with a low risk of loss.
-                    </p>
-                  </div>
-                </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 p-5 flex gap-3">
-                  <Hand className="w-5 h-5 text-sky-600 dark:text-sky-400 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-bold text-slate-900 dark:text-white">Hands-Free Trading</p>
-                    <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                      Let the AI do the heavy lifting. You can set your risk/reward ratio and let the EA execute trades automatically.
-                    </p>
-                  </div>
-                </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 p-5 flex gap-3">
-                  <Target className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-bold text-slate-900 dark:text-white">Live Signals</p>
-                    <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                      Get live signals and email notifications for trades.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <p className="mt-5 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                Trading involves risk. Past performance is not indicative of future results. Use demo mode to test before
-                trading live funds.
-              </p>
-            </div>
+            <p className="mt-8 text-center text-xs text-slate-500 dark:text-slate-400 max-w-2xl mx-auto leading-relaxed">
+              Trading involves risk. Past performance is not indicative of future results. Use demo mode to test before
+              trading live funds.
+            </p>
           </div>
         </section>
 
