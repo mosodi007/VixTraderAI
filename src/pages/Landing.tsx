@@ -115,7 +115,7 @@ export function Landing() {
             </p>
 
             <h1 className="mt-6 text-4xl sm:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.1]">
-              The #1 AI Copy Trading & Signals Platform
+              AI Copy Trading & Signals Platform
               <span className="block mt-1 sm:mt-2 bg-gradient-to-r from-emerald-700 to-emerald-500 dark:from-emerald-400 dark:to-emerald-300 bg-clip-text text-transparent">
               For Volatility Indices
               </span>
@@ -177,10 +177,6 @@ export function Landing() {
                 </div>
               </div>
             </div>
-            <p className="mt-8 text-center text-xs text-slate-500 dark:text-slate-400 max-w-2xl mx-auto leading-relaxed">
-              Trading involves risk. Past performance is not indicative of future results. Use demo mode to test before
-              trading live funds.
-            </p>
           </div>
         </section>
 
