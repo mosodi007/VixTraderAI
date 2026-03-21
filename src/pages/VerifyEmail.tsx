@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { getEdgeFunctionHeaders, supabase } from '../lib/supabase';
 import { useTheme } from '../contexts/ThemeContext';
 import logoLight from '../assets/Vixai-logo.png';
 import logoDark from '../assets/Vixai-logo-dark.png';
@@ -109,10 +109,9 @@ export function VerifyEmail() {
       const response = await fetch(SEND_ENDPOINT, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          ...getEdgeFunctionHeaders(accessToken),
         },
-        body: JSON.stringify({ email: emailToSend }),
+        body: JSON.stringify({ email: emailToSend.trim().toLowerCase() }),
       });
 
       const rawText = await response.text().catch(() => '');
@@ -154,7 +153,9 @@ export function VerifyEmail() {
       try {
         const response = await fetch(VERIFY_ENDPOINT, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            ...getEdgeFunctionHeaders(),
+          },
           body: JSON.stringify({ token }),
         });
         const data = await response.json().catch(() => ({}));

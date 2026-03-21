@@ -5,7 +5,7 @@
 This system provides fully automated, real-time trading signal generation with the following features:
 
 - **Event-Driven Signal Detection**: Signals appear when indicators confirm trade setups
-- **Real-time Scan Cycle**: Automated market scanning every 1 minute for maximum responsiveness
+- **Scheduled Scan Cycle**: Automated market scanning every 5 minutes
 - **One Signal Per Asset Rule**: Only one active signal per symbol at any time
 - **High-Quality Signals Only**: Minimum 75% confidence, 2:1 risk-reward ratio, 3+ indicator confirmations
 - **Multi-Timeframe Analysis**: Validates signals across M5, M15, M30, and H1 timeframes
@@ -17,7 +17,7 @@ This system provides fully automated, real-time trading signal generation with t
 ### Edge Functions
 
 1. **auto-generate-signals** (Deployed)
-   - Scans 5 symbols (R_10, R_25, R_50, R_75, R_100) every 1 minute
+   - Scans 5 symbols (R_10, R_25, R_50, R_75, R_100) every 5 minutes
    - Checks for active signals to enforce one-signal-per-asset rule
    - Analyzes market data using advanced indicator-based detection
    - Generates signals only when quality thresholds are met
@@ -51,10 +51,10 @@ You need to configure two cron jobs in your Supabase dashboard:
 4. Navigate to **SQL Editor** and run the following SQL:
 
 ```sql
--- Schedule auto-generate-signals to run every 1 minute
+-- Schedule auto-generate-signals to run every 5 minutes
 SELECT cron.schedule(
   'auto-generate-signals',
-  '* * * * *',
+  '*/5 * * * *',
   $$
   SELECT
     net.http_post(
@@ -88,10 +88,10 @@ SELECT cron.schedule(
 
 If you prefer using an external cron service (like cron-job.org or EasyCron):
 
-1. **For auto-generate-signals** (every 1 minute):
+1. **For auto-generate-signals** (every 5 minutes):
    - URL: `https://YOUR_PROJECT_REF.supabase.co/functions/v1/auto-generate-signals`
    - Method: POST
-   - Schedule: `* * * * *` (every 1 minute)
+   - Schedule: `*/5 * * * *` (every 5 minutes)
    - Headers: None required (verify_jwt is false)
 
 2. **For monitor-signal-outcomes** (every 5 minutes):
@@ -143,7 +143,7 @@ Check the edge function logs in your Supabase dashboard:
 
 ### Signal Generation Flow
 
-1. Every 1 minute, `auto-generate-signals` runs
+1. Every 5 minutes, `auto-generate-signals` runs
 2. For each symbol (R_10, R_25, R_50, R_75, R_100):
    - Check if symbol already has an active signal → Skip if yes
    - Fetch 200 historical ticks from Deriv API

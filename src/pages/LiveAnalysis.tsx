@@ -260,7 +260,7 @@ export function LiveAnalysis() {
                 <div className="text-slate-500 text-center py-12">
                   <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p>Starting automatic analysis...</p>
-                  <p className="text-xs mt-2 opacity-75">Scans also run every 1 min in the background. Enable Auto-scan to run again when the timer hits zero.</p>
+                  <p className="text-xs mt-2 opacity-75">Scans also run every 5 min in the background. Enable Auto-scan to run again when the timer hits zero.</p>
                 </div>
               ) : (
                 logs.map((log, idx) => (

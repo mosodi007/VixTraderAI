@@ -349,7 +349,7 @@ Deno.serve(async (req: Request) => {
       .eq('id', '00000000-0000-0000-0000-000000000001')
       .single();
 
-    const scanIntervalMinutes = scheduleData?.scan_interval_minutes || 1;
+    const scanIntervalMinutes = scheduleData?.scan_interval_minutes || 5;
     const nextScanTime = new Date();
     nextScanTime.setMinutes(nextScanTime.getMinutes() + scanIntervalMinutes);
 

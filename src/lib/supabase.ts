@@ -7,7 +7,27 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    flowType: 'pkce',
+    detectSessionInUrl: true,
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+});
+
+/**
+ * Headers for calling Edge Functions via fetch().
+ * Supabase requires `apikey` + `Authorization: Bearer <anon or user JWT>`.
+ * Use the anon key when the user has no session (e.g. right after sign-up if Auth withholds session until confirm).
+ */
+export function getEdgeFunctionHeaders(accessToken?: string | null) {
+  return {
+    'Content-Type': 'application/json',
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${accessToken || supabaseAnonKey}`,
+  } as const;
+}
 
 export interface Database {
   public: {

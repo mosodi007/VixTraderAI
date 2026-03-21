@@ -30,7 +30,7 @@ Deno.serve(async (req: Request) => {
     if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) throw new Error("Supabase configuration missing");
 
     const requestBody = await req.json().catch(() => ({}));
-    const emailFromBody = String((requestBody as any)?.email || '').trim();
+    const emailFromBody = String((requestBody as any)?.email || '').trim().toLowerCase();
 
     const authHeader = req.headers.get("Authorization") ?? req.headers.get("authorization");
     let user: any = null;

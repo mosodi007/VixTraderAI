@@ -18,3 +18,10 @@ verify_jwt = false
 
 [functions.auto-generate-signals]
 verify_jwt = false
+
+# Public verification flow: no Supabase user JWT when email confirmation blocks session.
+[functions.send-email-verification]
+verify_jwt = false
+
+[functions.verify-email-signup]
+verify_jwt = false

@@ -257,7 +257,7 @@ function LiveAnalysisConsoleInline() {
               <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p>Starting automatic analysis...</p>
               <p className="text-xs mt-2 opacity-75">
-                Scans also run every 1 min in the background. Enable Auto-scan to run again when the timer hits zero.
+                Scans also run every 5 min in the background. Enable Auto-scan to run again when the timer hits zero.
               </p>
             </div>
           ) : (

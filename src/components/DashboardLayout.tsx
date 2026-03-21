@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, Sun, Moon, Bell, BellRing, MessageCircle } from 'lucide-react';
+import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, Sun, Moon, Bell, BellRing, MessageCircle, History } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { playNewSignalAlert, unlockAudio } from '../lib/soundAlert';
 import logoLight from '../assets/Vixai-logo.png';
@@ -22,7 +22,7 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
   const navigation = [
     { name: 'Dashboard', icon: Home, page: 'home' },
     { name: 'Live Signals', icon: TrendingUp, page: 'signals' },
-    // { name: 'Past Signals', icon: History, page: 'past-signals' },
+    { name: 'Past Signals', icon: History, page: 'past-signals' },
     { name: 'Performance', icon: BarChart3, page: 'performance' },
     { name: 'Settings', icon: Settings, page: 'settings' },
   ];

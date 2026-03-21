@@ -24,10 +24,12 @@ interface AuthContextType {
     email: string,
     password: string,
     fullName?: string,
-  ) => Promise<{ error: Error | null }>;
+  ) => Promise<{ error: Error | null; session?: Session | null }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   setTradingMode: (mode: TradingMode) => Promise<{ error: Error | null }>;
+  /** Opens Google OAuth; browser redirects away on success. */
+  signInWithGoogle: () => Promise<{ error: Error | null }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -40,6 +42,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [hasVerifiedLiveMt5, setHasVerifiedLiveMt5] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const isGoogleUser = (u: User) =>
+    !!u.identities?.some((i) => i.provider === 'google') ||
+    (u.app_metadata as Record<string, unknown> | undefined)?.provider === 'google';
+
   const loadProfileAndStatus = async (nextUser: User | null) => {
     if (!nextUser) {
       setProfile(null);
@@ -48,11 +54,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const { data: prof } = await supabase
+    let { data: prof } = await supabase
       .from('profiles')
       .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at')
       .eq('id', nextUser.id)
       .maybeSingle();
+
+    const google = isGoogleUser(nextUser);
+    const meta = nextUser.user_metadata as Record<string, unknown> | undefined;
+    const metaFullName =
+      (typeof meta?.full_name === 'string' && meta.full_name) ||
+      (typeof meta?.name === 'string' && meta.name) ||
+      null;
+
+    // OAuth (Google): create profile row; Google already verified the email.
+    if (!prof?.id) {
+      const { error: upsertErr } = await supabase.from('profiles').upsert(
+        {
+          id: nextUser.id,
+          email: (nextUser.email ?? '').trim().toLowerCase(),
+          full_name: metaFullName,
+          trading_mode: 'demo',
+          email_verified_at: google ? new Date().toISOString() : null,
+        },
+        { onConflict: 'id' },
+      );
+      if (!upsertErr) {
+        const { data: again } = await supabase
+          .from('profiles')
+          .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at')
+          .eq('id', nextUser.id)
+          .maybeSingle();
+        prof = again;
+      }
+    } else if (google && !(prof as any).email_verified_at) {
+      // Linked Google sign-in: mark custom verification so app gating matches Auth.
+      await supabase
+        .from('profiles')
+        .update({
+          email_verified_at: new Date().toISOString(),
+          email_verification_token: null,
+          email_verification_expires_at: null,
+          ...(metaFullName && !(prof as any).full_name ? { full_name: metaFullName } : {}),
+        })
+        .eq('id', nextUser.id);
+      const { data: again } = await supabase
+        .from('profiles')
+        .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at')
+        .eq('id', nextUser.id)
+        .maybeSingle();
+      prof = again;
+    }
 
     // Ensure profile exists; keep this resilient for older users.
     if (!prof?.id) {
@@ -141,7 +193,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (profileError) throw profileError;
       }
 
-      return { error: null };
+      return { error: null, session: data.session ?? null };
     } catch (error) {
       return { error: error as Error };
     }
@@ -165,6 +217,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  const signInWithGoogle = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}${window.location.pathname || '/'}`,
+          queryParams: {
+            prompt: 'select_account',
+          },
+        },
+      });
+      if (error) throw error;
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
+  };
+
   const setTradingMode = async (mode: TradingMode) => {
     try {
       if (!user) throw new Error('Not signed in');
@@ -186,7 +256,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, tradingMode, hasVerifiedLiveMt5, loading, signUp, signIn, signOut, setTradingMode }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        profile,
+        tradingMode,
+        hasVerifiedLiveMt5,
+        loading,
+        signUp,
+        signIn,
+        signOut,
+        setTradingMode,
+        signInWithGoogle,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
