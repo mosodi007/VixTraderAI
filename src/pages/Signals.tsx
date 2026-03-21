@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
@@ -285,6 +285,8 @@ export function Signals() {
   const [mt5Connected, setMt5Connected] = useState<boolean | null>(null);
   const [isVerifiedMember, setIsVerifiedMember] = useState<boolean | null>(null);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
+  /** True when the list is narrowed to signal(s) tied to this user's sent/open trades */
+  const [hasOpenTradeSlot, setHasOpenTradeSlot] = useState(false);
 
   const checkMt5Connected = async () => {
     if (!user?.id) {
@@ -329,75 +331,54 @@ export function Signals() {
     setVerificationStatus(approved ? 'verified' : rejected ? 'rejected' : pending ? 'pending' : null);
   };
 
-  useEffect(() => {
-    checkMt5Connected();
-    checkVerifiedMember();
+  const loadSignals = useCallback(async () => {
+    const { data } = await supabase
+      .from('signals')
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
 
-    // Poll for new signals every 30s so list updates when signals are created from Live Analysis (Realtime can miss or be disabled)
-    const pollInterval = setInterval(() => {
-      checkMt5Connected();
-      checkVerifiedMember();
-    }, 30000);
+    let list = data || [];
+    setHasOpenTradeSlot(false);
 
-    // Real-time subscription for new signals (show all; backend controls quality)
-    const subscription = supabase
-      .channel('signals')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'signals' }, (payload) => {
-        const newSignal = payload.new as Signal;
-        setSignals((prev) => [newSignal, ...prev]);
+    // One active trade per account: while this user has sent/open trades, only show those signals
+    // (avoids a wall of duplicate market signals until their position closes).
+    if (user?.id) {
+      const { data: openTrades } = await supabase
+        .from('trades')
+        .select('signal_id')
+        .eq('user_id', user.id)
+        .in('status', ['sent', 'open'])
+        .not('signal_id', 'is', null)
+        .limit(50);
+      const ids = [...new Set((openTrades || []).map((t: { signal_id: string }) => String(t.signal_id)))];
+      if (ids.length > 0) {
+        list = list.filter((s: Signal) => ids.includes(s.id));
+        setHasOpenTradeSlot(true);
+      }
+    }
+    const prevIds = previousSignalIdsRef.current;
+    const newIds = new Set(list.map((s: Signal) => s.id));
+    const isSubsequentLoad = prevIds.size > 0;
+    const addedSignals = isSubsequentLoad ? list.filter((s: Signal) => !prevIds.has(s.id)) : [];
+    previousSignalIdsRef.current = newIds;
 
-        // Show browser notification
-        if ('Notification' in window && Notification.permission === 'granted') {
+    if (addedSignals.length > 0) {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        addedSignals.forEach((s: Signal) => {
           new Notification('New Trading Signal!', {
-            body: `${newSignal.direction} ${newSignal.symbol} at ${newSignal.entry_price}`,
+            body: `${s.direction} ${s.symbol} at ${s.entry_price}`,
             icon: '/icon.png'
           });
-        }
-
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'signals' }, (payload) => {
-        const updated = payload.new as Signal & { is_active?: boolean; outcome?: string | null };
-        const closedOutcomes = ['tp1_hit', 'tp2_hit', 'tp3_hit', 'sl_hit', 'expired'];
-        const outcomeClosed = updated?.outcome != null && closedOutcomes.includes(String(updated.outcome).toLowerCase());
-        const isClosed = updated?.is_active === false || outcomeClosed;
-        if (isClosed) {
-          setSignals((prev) => prev.filter((s) => s.id !== updated.id));
-          return;
-        }
-        setSignals((prev) =>
-          prev.map((signal) => (signal.id === updated.id ? (updated as Signal) : signal))
-        );
-      })
-      .subscribe();
-
-    // Monitor signal prices every 60 seconds
-    const priceMonitorInterval = setInterval(() => {
-      monitorSignalPrices();
-    }, 60000);
-
-    // Request notification permission
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+        });
+      }
     }
 
-    return () => {
-      subscription.unsubscribe();
-      clearInterval(priceMonitorInterval);
-      clearInterval(pollInterval);
-    };
+    setSignals(list);
+    setLoading(false);
   }, [user]);
 
-  useEffect(() => {
-    if (mt5Connected) {
-      loadSignals();
-      monitorSignalPrices();
-    } else {
-      setSignals([]);
-      setLoading(false);
-    }
-  }, [mt5Connected]);
-
-  const monitorSignalPrices = async () => {
+  const monitorSignalPrices = useCallback(async () => {
     try {
       const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/monitor-signal-outcomes`;
       const response = await fetch(apiUrl, {
@@ -418,36 +399,61 @@ export function Signals() {
     } catch (error) {
       console.error('[PRICE MONITOR] Error:', error);
     }
-  };
+  }, [loadSignals]);
 
-  const loadSignals = async () => {
-    const { data } = await supabase
-      .from('signals')
-      .select('*')
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
+  useEffect(() => {
+    checkMt5Connected();
+    checkVerifiedMember();
 
-    const list = data || [];
-    const prevIds = previousSignalIdsRef.current;
-    const newIds = new Set(list.map((s: Signal) => s.id));
-    const isSubsequentLoad = prevIds.size > 0;
-    const addedSignals = isSubsequentLoad ? list.filter((s: Signal) => !prevIds.has(s.id)) : [];
-    previousSignalIdsRef.current = newIds;
+    const pollInterval = setInterval(() => {
+      checkMt5Connected();
+      checkVerifiedMember();
+    }, 30000);
 
-    if (addedSignals.length > 0) {
-      if ('Notification' in window && Notification.permission === 'granted') {
-        addedSignals.forEach((s: Signal) => {
-          new Notification('New Trading Signal!', {
-            body: `${s.direction} ${s.symbol} at ${s.entry_price}`,
-            icon: '/icon.png'
-          });
-        });
-      }
+    const subscription = supabase
+      .channel('signals')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'signals' }, () => {
+        void loadSignals();
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'signals' }, (payload) => {
+        const updated = payload.new as Signal & { is_active?: boolean; outcome?: string | null };
+        const closedOutcomes = ['tp1_hit', 'tp2_hit', 'tp3_hit', 'sl_hit', 'expired'];
+        const outcomeClosed = updated?.outcome != null && closedOutcomes.includes(String(updated.outcome).toLowerCase());
+        const isClosed = updated?.is_active === false || outcomeClosed;
+        if (isClosed) {
+          setSignals((prev) => prev.filter((s) => s.id !== updated.id));
+          return;
+        }
+        setSignals((prev) =>
+          prev.map((signal) => (signal.id === updated.id ? (updated as Signal) : signal))
+        );
+      })
+      .subscribe();
+
+    const priceMonitorInterval = setInterval(() => {
+      void monitorSignalPrices();
+    }, 60000);
+
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
     }
 
-    setSignals(list);
-    setLoading(false);
-  };
+    return () => {
+      subscription.unsubscribe();
+      clearInterval(priceMonitorInterval);
+      clearInterval(pollInterval);
+    };
+  }, [user, loadSignals, monitorSignalPrices]);
+
+  useEffect(() => {
+    if (mt5Connected) {
+      void loadSignals();
+      void monitorSignalPrices();
+    } else {
+      setSignals([]);
+      setLoading(false);
+    }
+  }, [mt5Connected, loadSignals, monitorSignalPrices]);
 
   const groupSignalsByDate = (signals: Signal[]): GroupedSignals => {
     const grouped: GroupedSignals = {};
@@ -572,6 +578,11 @@ export function Signals() {
                   <div>
                     <h3 className="text-lg font-bold text-black dark:text-white">Active Signals</h3>
                     <p className="text-sm text-slate-600 dark:text-slate-400">{activeSignalsList.length} Signal{activeSignalsList.length !== 1 ? 's' : ''} Available</p>
+                    {hasOpenTradeSlot && (
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400/90 mt-2 max-w-xl">
+                        Showing only your current trade (sent or open). More signals will appear after this position closes at SL/TP.
+                      </p>
+                    )}
                   </div>
                   
                 </div>

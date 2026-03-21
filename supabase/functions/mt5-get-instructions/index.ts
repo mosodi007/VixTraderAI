@@ -312,7 +312,7 @@ Deno.serve(async (req: Request) => {
     const { data: executedTrades, error: trErr } = await supabase
       .from("trades")
       .select("signal_id,status")
-      .eq("mt5_login", mt5_login)
+      .eq("mt5_login", mt5_loginStored)
       .not("signal_id", "is", null)
       .in("status", ["open", "closed"])
       .order("created_at", { ascending: false })
@@ -320,6 +320,22 @@ Deno.serve(async (req: Request) => {
 
     if (trErr) throw trErr;
     const executed = new Set((executedTrades || []).map((t: any) => String(t.signal_id)));
+
+    // One active trade slot per MT5 account: while any trade is still sent or open, only that
+    // signal may receive instructions — no parallel dispatches for other signals until SL/TP/close.
+    const { data: inFlightTrades, error: ifErr } = await supabase
+      .from("trades")
+      .select("signal_id,created_at")
+      .eq("mt5_login", mt5_loginStored)
+      .in("status", ["sent", "open"])
+      .not("signal_id", "is", null)
+      .order("created_at", { ascending: true });
+
+    if (ifErr) throw ifErr;
+    let singleActiveSignalId: string | null = null;
+    if (inFlightTrades && inFlightTrades.length > 0) {
+      singleActiveSignalId = String((inFlightTrades[0] as any).signal_id);
+    }
     const dispatchRetrySeconds = Math.max(15, Number(Deno.env.get("DISPATCH_RETRY_SECONDS") || 120));
 
     const instructions: any[] = [];
@@ -336,6 +352,10 @@ Deno.serve(async (req: Request) => {
       const symbolCode = String(s.symbol || "").trim();
       if (executed.has(id)) {
         recordSkip("already_executed", id, symbolCode);
+        continue;
+      }
+      if (singleActiveSignalId !== null && id !== singleActiveSignalId) {
+        recordSkip("one_active_trade_per_account", id, symbolCode);
         continue;
       }
       if (!s.symbol || !s.direction) {
@@ -404,7 +424,7 @@ Deno.serve(async (req: Request) => {
       const { data: recentRows, error: recentErr } = await supabase
         .from("trades")
         .select("id,status,created_at,opened_at")
-        .eq("mt5_login", mt5_login)
+        .eq("mt5_login", mt5_loginStored)
         .eq("signal_id", id)
         .order("created_at", { ascending: false })
         .limit(10);
@@ -455,7 +475,7 @@ Deno.serve(async (req: Request) => {
           .from("trades")
           .insert({
             user_id: acct.user_id,
-            mt5_login,
+            mt5_login: mt5_loginStored,
             signal_id: id,
             symbol: symbolForEA,
             direction: String(s.direction),
@@ -496,7 +516,8 @@ Deno.serve(async (req: Request) => {
         magic: 123456,
         comment: `VIX_AI:${id}`,
       });
-      if (instructions.length >= max) break;
+      // One instruction per poll so the EA never receives multiple new signals at once (single active trade).
+      break;
     }
 
     console.log(`[mt5-get-instructions] mt5_login=${mt5_loginStored} active_signals=${sigList.length} already_executed=${executed.size} instructions=${instructions.length}`);

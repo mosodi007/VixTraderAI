@@ -143,9 +143,11 @@ Deno.serve(async (req: Request) => {
 
     const accountInfo = validationResult.accountInfo!;
 
+    const isDemo = validationResult.accountType === "demo";
     const updateData: any = {
       verified: true,
-      verification_status: "verified",
+      // Demo accounts: store `approved`; live accounts: `verified` (both are treated as OK in edge functions).
+      verification_status: isDemo ? "approved" : "verified",
       verified_at: new Date().toISOString(),
       balance: accountInfo.balance,
       equity: accountInfo.equity,
