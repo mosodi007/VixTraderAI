@@ -230,7 +230,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Reconcile closing deals: update trades and close linked signals
+    // Reconcile closing deals: update trades only (signals stay active until expiry; outcomes are per-user on trades)
     for (const d of deals) {
       const comment = String(d.comment ?? "").trim();
       const signalId = extractSignalIdFromComment(comment);
@@ -250,14 +250,6 @@ Deno.serve(async (req: Request) => {
         })
         .eq("mt5_login", mt5_login)
         .eq("signal_id", signalId);
-
-      // close signal row
-      await supabase.rpc("update_signal_outcome", {
-        p_signal_id: signalId,
-        p_outcome: profit >= 0 ? "TP1_HIT" : "SL_HIT",
-        p_close_price: exitPrice ?? 0,
-        p_profit_loss: profit,
-      });
     }
 
     // Mark account as synced too

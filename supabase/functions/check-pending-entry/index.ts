@@ -119,44 +119,7 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
-        // Check there is still no active signal for this symbol
-        const { data: activeRegistry } = await supabase
-          .from("active_signal_registry")
-          .select("*")
-          .eq("symbol", symbol)
-          .maybeSingle();
-
-        if (activeRegistry) {
-          console.log(`[PENDING][${symbol}] Active signal already present. Skipping conversion.`);
-          results.push({
-            id: pending.id,
-            symbol,
-            direction,
-            status: "skipped_active_signal",
-            current_price: 0,
-            suggested_entry: suggestedEntry,
-          });
-          continue;
-        }
-
-        const { data: activeSignals } = await supabase
-          .from("signals")
-          .select("id")
-          .eq("symbol", symbol)
-          .eq("is_active", true);
-
-        if (activeSignals && activeSignals.length > 0) {
-          console.log(`[PENDING][${symbol}] Active signals exist in database. Skipping conversion.`);
-          results.push({
-            id: pending.id,
-            symbol,
-            direction,
-            status: "skipped_active_signal",
-            current_price: 0,
-            suggested_entry: suggestedEntry,
-          });
-          continue;
-        }
+        // Multiple concurrent signals per symbol are allowed; do not block conversion on registry/active rows.
 
         // Get latest price
         const ticks = await derivAPI.getTickHistory(symbol, 5);

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,8 +8,6 @@ import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 
 // Keep in sync with `supabase/functions/auto-generate-signals/index.ts` monitored symbols.
 const SYMBOLS = ['R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ30V', '1HZ75V', '1HZ100V'] as const;
-// Only trade/configure this symbol for now.
-const ACTIVE_LOTS_SYMBOL = '1HZ30V' as (typeof SYMBOLS)[number];
 
 const SYMBOL_NAMES: Record<(typeof SYMBOLS)[number], string> = {
   'R_25': 'Volatility 25 Index',
@@ -149,7 +147,6 @@ export function Settings() {
   useEffect(() => {
     loadDemoAndLiveAccounts();
     loadMt5Accounts();
-    loadSymbolPoints();
     loadMinAiConfidence();
   }, [user]);
 
@@ -157,6 +154,11 @@ export function Settings() {
     if (!user) return;
     if (!selectedMt5Login) return;
     loadSymbolTradeSettings(selectedMt5Login);
+  }, [user, selectedMt5Login]);
+
+  useEffect(() => {
+    if (!user) return;
+    void loadSymbolPoints();
   }, [user, selectedMt5Login]);
 
   const loadDemoAndLiveAccounts = async () => {
@@ -248,6 +250,14 @@ export function Settings() {
     tradingMode === 'demo' ? a.account_type === 'demo' : isLiveMt5Row(a),
   );
 
+  /** When an MT5 account exists, only symbols enabled in Trading Lots appear here; otherwise all symbols (global defaults). */
+  const symbolsShownForSlTp = useMemo(() => {
+    if (accountsForMode.length === 0) {
+      return [...SYMBOLS];
+    }
+    return SYMBOLS.filter((sym) => symbolTradeSettings[sym]?.tradeEnabled !== false);
+  }, [accountsForMode.length, symbolTradeSettings]);
+
   useEffect(() => {
     const list = accountsForMode;
     if (list.length === 0) {
@@ -258,18 +268,44 @@ export function Settings() {
     if (!ok) setSelectedMt5Login(String(list[0].mt5_login || ''));
   }, [tradingMode, mt5Accounts]);
 
+  /** Defaults from global `symbol_sl_tp_config`, overlaid with per-account `mt5_symbol_settings` when logged in. */
   const loadSymbolPoints = async () => {
-    const { data } = await supabase.from('symbol_sl_tp_config').select('symbol, sl_points, tp_points');
     const next: Record<string, { slPoints: number; tpPoints: number }> = {};
     SYMBOLS.forEach((sym) => {
       next[sym] = DEFAULT_POINTS[sym] ?? { slPoints: 800, tpPoints: 2400 };
     });
-    if (data?.length) {
-      data.forEach((row: { symbol: string; sl_points: number; tp_points: number }) => {
-        const sl = Math.max(1, Math.round(Number(row.sl_points) || next[row.symbol]?.slPoints || 400));
-        next[row.symbol] = { slPoints: sl, tpPoints: sl * 3 };
+
+    const { data: globalRows } = await supabase.from('symbol_sl_tp_config').select('symbol, sl_points, tp_points');
+    if (globalRows?.length) {
+      globalRows.forEach((row: { symbol: string; sl_points: number; tp_points: number }) => {
+        const sym = String(row.symbol || '').trim();
+        if (!sym) return;
+        const sl = Math.max(1, Math.round(Number(row.sl_points) || next[sym]?.slPoints || 400));
+        const tpRaw = Number(row.tp_points);
+        const tp = Number.isFinite(tpRaw) && tpRaw > 0 ? Math.max(1, Math.round(tpRaw)) : sl * 3;
+        next[sym] = { slPoints: sl, tpPoints: tp };
       });
     }
+
+    if (user && selectedMt5Login) {
+      const { data: userRows } = await supabase
+        .from('mt5_symbol_settings')
+        .select('symbol, sl_points, tp_points')
+        .eq('user_id', user.id)
+        .eq('mt5_login', selectedMt5Login);
+      (userRows || []).forEach((row: { symbol?: string; sl_points?: number | null; tp_points?: number | null }) => {
+        const sym = String(row.symbol || '').trim() as (typeof SYMBOLS)[number];
+        if (!sym || !SYMBOLS.includes(sym)) return;
+        const slN = row.sl_points;
+        if (slN == null || !Number.isFinite(Number(slN)) || Number(slN) <= 0) return;
+        const sl = Math.max(1, Math.round(Number(slN)));
+        const tpN = row.tp_points;
+        const tp =
+          tpN != null && Number.isFinite(Number(tpN)) && Number(tpN) > 0 ? Math.max(1, Math.round(Number(tpN))) : sl * 3;
+        next[sym] = { slPoints: sl, tpPoints: tp };
+      });
+    }
+
     setSymbolPoints(next);
   };
 
@@ -284,7 +320,7 @@ export function Settings() {
 
     const { data, error } = await supabase
       .from('mt5_symbol_settings')
-      .select('symbol, trade_enabled, lot_mode, fixed_lot, percent')
+      .select('symbol, trade_enabled, lot_mode, fixed_lot, percent, sl_points, tp_points')
       .eq('user_id', user.id)
       .eq('mt5_login', mt5_login);
 
@@ -335,28 +371,63 @@ export function Settings() {
 
   const handleSaveSymbolPoints = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) {
+      setPointsMessage({ type: 'error', text: 'Not authenticated' });
+      return;
+    }
+    if (!selectedMt5Login) {
+      setPointsMessage({ type: 'error', text: 'Select an MT5 login in Trading Lots above to save SL/TP for that account.' });
+      return;
+    }
+
     setPointsLoading(true);
     setPointsMessage(null);
 
     try {
-      for (const symbol of SYMBOLS) {
+      if (symbolsShownForSlTp.length === 0) {
+        setPointsMessage({ type: 'error', text: 'No symbols to save. Enable at least one symbol in Trading Lots above.' });
+        setPointsLoading(false);
+        return;
+      }
+      for (const symbol of symbolsShownForSlTp) {
+        const s = symbolTradeSettings[symbol] ?? { tradeEnabled: true, lotMode: 'fixed' as LotMode, fixedLot: 0.01, percent: 0 };
+        const trade_enabled = !!s.tradeEnabled;
+        const lot_mode: LotMode = s.lotMode === 'percent_balance' ? 'percent_balance' : 'fixed';
+        const minLot = SYMBOL_MIN_LOT[symbol] ?? 0;
+        const maxLot = SYMBOL_MAX_LOT[symbol] ?? Number.POSITIVE_INFINITY;
+        const step = SYMBOL_LOT_STEP[symbol] ?? 0.01;
+        const decimals = step === 0.001 ? 3 : 2;
+        const factor = Math.pow(10, decimals);
+        const fixed_lot_raw = Math.round(Math.max(0, Number(s.fixedLot) || 0) * factor) / factor;
+        const fixed_lot = Math.min(maxLot, Math.max(minLot, fixed_lot_raw));
+        const percent = Math.round(Math.max(0, Math.min(100, Number(s.percent) || 0)) * 100) / 100;
+
         const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 400, tpPoints: 1200 };
         const sl = Math.max(1, Math.round(Number(pts.slPoints)) || 400);
         const tp = sl * 3;
 
-        const { error } = await supabase
-          .from('symbol_sl_tp_config')
-          .upsert(
-            { symbol, sl_points: sl, tp_points: tp, updated_at: new Date().toISOString() },
-            { onConflict: 'symbol' }
-          );
+        const { error } = await supabase.from('mt5_symbol_settings').upsert(
+          {
+            user_id: user.id,
+            mt5_login: selectedMt5Login,
+            symbol,
+            trade_enabled,
+            lot_mode,
+            fixed_lot: fixed_lot || 0,
+            percent: lot_mode === 'percent_balance' ? percent : 0,
+            sl_points: sl,
+            tp_points: tp,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id,mt5_login,symbol' },
+        );
 
         if (error) throw error;
       }
 
       setPointsMessage({
         type: 'success',
-        text: 'SL points saved. TP is always 3× SL (1:3 R:R). New signals use these distances.',
+        text: 'SL/TP points saved for this MT5 account. TP follows 3× SL (1:3 R:R). The EA uses your settings when dispatching trades.',
       });
     } catch (error: any) {
       setPointsMessage({ type: 'error', text: error.message || 'Failed to save symbol points' });
@@ -380,7 +451,7 @@ export function Settings() {
     setTradeSettingsMessage(null);
 
     try {
-      for (const symbol of [ACTIVE_LOTS_SYMBOL]) {
+      for (const symbol of SYMBOLS) {
         const s = symbolTradeSettings[symbol] ?? { tradeEnabled: true, lotMode: 'fixed' as LotMode, fixedLot: 0.01, percent: 0 };
         const trade_enabled = !!s.tradeEnabled;
         const lot_mode: LotMode = s.lotMode === 'percent_balance' ? 'percent_balance' : 'fixed';
@@ -393,6 +464,10 @@ export function Settings() {
         const fixed_lot = Math.min(maxLot, Math.max(minLot, fixed_lot_raw));
         const percent = Math.round(Math.max(0, Math.min(100, Number(s.percent) || 0)) * 100) / 100;
 
+        const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 400, tpPoints: 1200 };
+        const slPts = Math.max(1, Math.round(Number(pts.slPoints)) || 400);
+        const tpPts = slPts * 3;
+
         const { error } = await supabase
           .from('mt5_symbol_settings')
           .upsert(
@@ -404,6 +479,8 @@ export function Settings() {
               lot_mode,
               fixed_lot: fixed_lot || 0,
               percent: lot_mode === 'percent_balance' ? percent : 0,
+              sl_points: slPts,
+              tp_points: tpPts,
               updated_at: new Date().toISOString(),
             },
             { onConflict: 'user_id,mt5_login,symbol' }
@@ -749,13 +826,167 @@ export function Settings() {
           </div>
           )}
 
-          {/* <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
+          <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Trading Lots Settings</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
+              Enable/disable trading per symbol and set lot sizing. Percent mode uses: <span className="font-mono">lot = (balance × percent/100) / 1000</span>.
+            </p>
+
+            {accountsForMode.length === 0 ? (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+                <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                  {tradingMode === 'demo'
+                    ? 'Add a demo MT5 account above to configure per-symbol trading settings.'
+                    : 'Add a live MT5 account above to configure per-symbol trading settings.'}
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                    MT5 Login ({tradingMode === 'demo' ? 'Demo' : 'Live'})
+                  </label>
+                  <select
+                    value={selectedMt5Login}
+                    onChange={(e) => setSelectedMt5Login(e.target.value)}
+                    className="w-full max-w-xs px-4 py-3 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                  >
+                    {accountsForMode.map((a) => (
+                      <option key={String(a.mt5_login)} value={String(a.mt5_login)}>
+                        {String(a.mt5_login)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {tradeSettingsMessage && (
+                  <div className={`flex items-center gap-3 p-4 rounded-lg mb-6 ${
+                    tradeSettingsMessage.type === 'success'
+                      ? 'bg-emerald-500/10 border border-emerald-500/30'
+                      : 'bg-red-500/10 border border-red-500/30'
+                  }`}>
+                    {tradeSettingsMessage.type === 'success' ? (
+                      <CheckCircle className="w-5 h-5 text-emerald-400" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5 text-red-400" />
+                    )}
+                    <p className={`text-sm ${tradeSettingsMessage.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {tradeSettingsMessage.text}
+                    </p>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveSymbolTradeSettings} className="space-y-6">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-600">
+                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Symbol</th>
+                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300 text-center">Enabled</th>
+                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Lot mode</th>
+                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Fixed lot</th>
+                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">% balance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {SYMBOLS.map((symbol) => {
+                          const s = symbolTradeSettings[symbol] ?? { tradeEnabled: true, lotMode: 'fixed' as LotMode, fixedLot: 0.01, percent: 0 };
+                          const isPercent = s.lotMode === 'percent_balance';
+                          const minLot = SYMBOL_MIN_LOT[symbol] ?? 0;
+                          const maxLot = SYMBOL_MAX_LOT[symbol] ?? 1000000;
+                          const lotStep = SYMBOL_LOT_STEP[symbol] ?? 0.01;
+                          return (
+                            <tr key={symbol} className="border-b border-slate-100 dark:border-slate-700/50">
+                              <td className="py-2 px-2 text-slate-900 dark:text-white">
+                                <div className="font-mono">{symbol}</div>
+                                <div className="text-xs text-slate-600 dark:text-slate-400">{SYMBOL_NAMES[symbol]}</div>
+                              </td>
+                              <td className="py-2 px-2 text-center align-middle">
+                                <input
+                                  type="checkbox"
+                                  checked={!!s.tradeEnabled}
+                                  onChange={(e) => setTradeSettingForSymbol(symbol, { tradeEnabled: e.target.checked })}
+                                  className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+                                  title={s.tradeEnabled ? 'Trading enabled for this symbol' : 'Trading disabled for this symbol'}
+                                  aria-label={`Enable trading for ${symbol}`}
+                                />
+                              </td>
+                              <td className="py-2 px-2">
+                                <select
+                                  value={s.lotMode}
+                                  onChange={(e) => setTradeSettingForSymbol(symbol, { lotMode: (e.target.value === 'percent_balance' ? 'percent_balance' : 'fixed') as LotMode })}
+                                  disabled={!s.tradeEnabled}
+                                  className="px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  <option value="fixed">Fixed</option>
+                                  <option value="percent_balance">% Balance</option>
+                                </select>
+                              </td>
+                              <td className="py-2 px-2">
+                                <input
+                                  type="number"
+                                  min={minLot}
+                                  max={maxLot}
+                                  step={lotStep}
+                                  value={s.fixedLot}
+                                  onChange={(e) => setTradeSettingForSymbol(symbol, { fixedLot: Number(e.target.value) || 0 })}
+                                  disabled={isPercent || !s.tradeEnabled}
+                                  className="w-28 px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                />
+                                <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-400">
+                                  Min {minLot} / Max {maxLot}
+                                </div>
+                              </td>
+                              <td className="py-2 px-2">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  step={0.01}
+                                  value={s.percent}
+                                  onChange={(e) => setTradeSettingForSymbol(symbol, { percent: Number(e.target.value) || 0 })}
+                                  disabled={!isPercent || !s.tradeEnabled}
+                                  className="w-28 px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={tradeSettingsLoading}
+                    className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                  >
+                    <Save className="w-5 h-5" />
+                    {tradeSettingsLoading ? 'Saving...' : 'Save Lot Size Settings'}
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
+
+          <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-emerald-500" />
               Symbol SL/TP Points
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-              Set Stop Loss and Take Profit in points per symbol. Each symbol has its own scale; adjust these to find what works. Used by automated signal generation.
+              Set Stop Loss and Take Profit in <strong className="text-slate-800 dark:text-slate-200">points per symbol</strong> for the{' '}
+              <strong className="text-slate-800 dark:text-slate-200">selected MT5 login</strong> above. Values are saved to your account (not global). Defaults match the system reference until you save.
+              The EA uses these distances when it dispatches instructions; automated signals still use system defaults for the shared signal row unless you override here.
+              {accountsForMode.length > 0 ? (
+                <span className="block mt-2 text-slate-600 dark:text-slate-400">
+                  Only symbols <strong className="text-slate-800 dark:text-slate-200">enabled</strong> in Trading Lots appear here. Choose the same MT5 login as in Trading Lots to save.
+                </span>
+              ) : (
+                <span className="block mt-2 text-slate-600 dark:text-slate-400">
+                  Add an MT5 account above to save per-account SL/TP. Until then, you can review system default distances (read-only save).
+                </span>
+              )}
             </p>
 
             {pointsMessage && (
@@ -789,43 +1020,51 @@ export function Settings() {
                     </tr>
                   </thead>
                   <tbody>
-                    {SYMBOLS.map((symbol) => {
-                      const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 800, tpPoints: 2400 };
-                      return (
-                        <tr key={symbol} className="border-b border-slate-100 dark:border-slate-700/50">
-                          <td className="py-2 px-2 text-slate-900 dark:text-white">
-                            <div className="font-mono">{symbol}</div>
-                            <div className="text-xs text-slate-600 dark:text-slate-400">{SYMBOL_NAMES[symbol]}</div>
-                          </td>
-                          <td className="py-2 px-2">
-                            <input
-                              type="number"
-                              min={1}
-                              step={1}
-                              value={pts.slPoints}
-                              onChange={(e) => setPointsForSymbol(symbol, Number(e.target.value) || 1)}
-                              className="w-28 px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                            />
-                          </td>
-                          <td className="py-2 px-2 text-slate-700 dark:text-slate-300 font-mono tabular-nums">
-                            {pts.slPoints * 3}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {symbolsShownForSlTp.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="py-10 px-4 text-center text-sm text-slate-600 dark:text-slate-400">
+                          No enabled symbols. Enable at least one symbol in <strong className="text-slate-800 dark:text-slate-200">Trading Lots</strong> above to set SL/TP points.
+                        </td>
+                      </tr>
+                    ) : (
+                      symbolsShownForSlTp.map((symbol) => {
+                        const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 800, tpPoints: 2400 };
+                        return (
+                          <tr key={symbol} className="border-b border-slate-100 dark:border-slate-700/50">
+                            <td className="py-2 px-2 text-slate-900 dark:text-white">
+                              <div className="font-mono">{symbol}</div>
+                              <div className="text-xs text-slate-600 dark:text-slate-400">{SYMBOL_NAMES[symbol]}</div>
+                            </td>
+                            <td className="py-2 px-2">
+                              <input
+                                type="number"
+                                min={1}
+                                step={1}
+                                value={pts.slPoints}
+                                onChange={(e) => setPointsForSymbol(symbol, Number(e.target.value) || 1)}
+                                className="w-28 px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              />
+                            </td>
+                            <td className="py-2 px-2 text-slate-700 dark:text-slate-300 font-mono tabular-nums">
+                              {pts.slPoints * 3}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
               <button
                 type="submit"
-                disabled={pointsLoading}
+                disabled={pointsLoading || symbolsShownForSlTp.length === 0 || !selectedMt5Login}
                 className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
               >
                 <Save className="w-5 h-5" />
                 {pointsLoading ? 'Saving...' : 'Save Symbol Points'}
               </button>
             </form>
-          </div> */}
+          </div>
 
           <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Trade filters</h3>
@@ -941,146 +1180,6 @@ export function Settings() {
                 </button>
               </form>
             </div>
-          </div>
-
-          <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Trading Lots Settings</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-              Enable/disable trading per symbol and set lot sizing. Percent mode uses: <span className="font-mono">lot = (balance × percent/100) / 1000</span>.
-            </p>
-
-            {accountsForMode.length === 0 ? (
-              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
-                <p className="text-sm text-yellow-700 dark:text-yellow-300">
-                  {tradingMode === 'demo'
-                    ? 'Add a demo MT5 account above to configure per-symbol trading settings.'
-                    : 'Add a live MT5 account above to configure per-symbol trading settings.'}
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                    MT5 Login ({tradingMode === 'demo' ? 'Demo' : 'Live'})
-                  </label>
-                  <select
-                    value={selectedMt5Login}
-                    onChange={(e) => setSelectedMt5Login(e.target.value)}
-                    className="w-full max-w-xs px-4 py-3 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  >
-                    {accountsForMode.map((a) => (
-                      <option key={String(a.mt5_login)} value={String(a.mt5_login)}>
-                        {String(a.mt5_login)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {tradeSettingsMessage && (
-                  <div className={`flex items-center gap-3 p-4 rounded-lg mb-6 ${
-                    tradeSettingsMessage.type === 'success'
-                      ? 'bg-emerald-500/10 border border-emerald-500/30'
-                      : 'bg-red-500/10 border border-red-500/30'
-                  }`}>
-                    {tradeSettingsMessage.type === 'success' ? (
-                      <CheckCircle className="w-5 h-5 text-emerald-400" />
-                    ) : (
-                      <AlertCircle className="w-5 h-5 text-red-400" />
-                    )}
-                    <p className={`text-sm ${tradeSettingsMessage.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {tradeSettingsMessage.text}
-                    </p>
-                  </div>
-                )}
-
-                <form onSubmit={handleSaveSymbolTradeSettings} className="space-y-6">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-200 dark:border-slate-600">
-                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Symbol</th>
-                          {/* <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Enabled</th> */}
-                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Lot mode</th>
-                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">Fixed lot</th>
-                          <th className="py-3 px-2 text-sm font-medium text-slate-700 dark:text-slate-300">% balance</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[ACTIVE_LOTS_SYMBOL].map((symbol) => {
-                          const s = symbolTradeSettings[symbol] ?? { tradeEnabled: true, lotMode: 'fixed' as LotMode, fixedLot: 0.01, percent: 0 };
-                          const isPercent = s.lotMode === 'percent_balance';
-                          const minLot = SYMBOL_MIN_LOT[symbol] ?? 0;
-                          const maxLot = SYMBOL_MAX_LOT[symbol] ?? 1000000;
-                          const lotStep = SYMBOL_LOT_STEP[symbol] ?? 0.01;
-                          return (
-                            <tr key={symbol} className="border-b border-slate-100 dark:border-slate-700/50">
-                              <td className="py-2 px-2 text-slate-900 dark:text-white">
-                                <div className="font-mono">{symbol}</div>
-                                <div className="text-xs text-slate-600 dark:text-slate-400">{SYMBOL_NAMES[symbol]}</div>
-                              </td>
-                              {/* <td className="py-2 px-2">
-                                <input
-                                  type="checkbox"
-                                  checked={!!s.tradeEnabled}
-                                  onChange={(e) => setTradeSettingForSymbol(symbol, { tradeEnabled: e.target.checked })}
-                                  className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
-                                />
-                              </td> */}
-                              <td className="py-2 px-2">
-                                <select
-                                  value={s.lotMode}
-                                  onChange={(e) => setTradeSettingForSymbol(symbol, { lotMode: (e.target.value === 'percent_balance' ? 'percent_balance' : 'fixed') as LotMode })}
-                                  className="px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                                >
-                                  <option value="fixed">Fixed</option>
-                                  <option value="percent_balance">% Balance</option>
-                                </select>
-                              </td>
-                              <td className="py-2 px-2">
-                                <input
-                                  type="number"
-                                  min={minLot}
-                                  max={maxLot}
-                                  step={lotStep}
-                                  value={s.fixedLot}
-                                  onChange={(e) => setTradeSettingForSymbol(symbol, { fixedLot: Number(e.target.value) || 0 })}
-                                  disabled={isPercent}
-                                  className="w-28 px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
-                                />
-                                <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-400">
-                                  Min {minLot} / Max {maxLot}
-                                </div>
-                              </td>
-                              <td className="py-2 px-2">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  step={0.01}
-                                  value={s.percent}
-                                  onChange={(e) => setTradeSettingForSymbol(symbol, { percent: Number(e.target.value) || 0 })}
-                                  disabled={!isPercent}
-                                  className="w-28 px-3 py-2 bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
-                                />
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={tradeSettingsLoading}
-                    className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
-                  >
-                    <Save className="w-5 h-5" />
-                    {tradeSettingsLoading ? 'Saving...' : 'Save Lot Size Settings'}
-                  </button>
-                </form>
-              </>
-            )}
           </div>
 
           {((tradingMode === 'demo' && demoAccount) || (tradingMode === 'live' && liveAccount)) && (

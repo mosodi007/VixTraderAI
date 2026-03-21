@@ -6,36 +6,36 @@ This system provides fully automated, real-time trading signal generation with t
 
 - **Event-Driven Signal Detection**: Signals appear when indicators confirm trade setups
 - **Scheduled Scan Cycle**: Automated market scanning every 5 minutes
-- **One Signal Per Asset Rule**: Only one active signal per symbol at any time
+- **Multiple Signals Per Symbol**: New signals can be generated even when other signals for the same symbol are still active; `active_signal_registry` only stores the **latest** pointer per symbol (upsert), not a hard lock
 - **High-Quality Signals Only**: Minimum 75% confidence, 2:1 risk-reward ratio, 3+ indicator confirmations
 - **Multi-Timeframe Analysis**: Validates signals across M5, M15, M30, and H1 timeframes
 - **Advanced Pattern Recognition**: Detects candlestick patterns (engulfing, hammer, morning/evening star, etc.)
-- **Automatic Signal Lifecycle**: Monitors and closes signals when TP or SL is hit
+- **Automatic Trade Lifecycle (user-specific)**: TP/SL outcomes use each user’s levels on **`trades`** (from `mt5_symbol_settings` / EA dispatch). Shared **`signals`** rows are mainly expired by **`expires_at`**; they are **not** closed globally when one user hits TP/SL
 
 ## System Architecture
 
 ### Edge Functions
 
 1. **auto-generate-signals** (Deployed)
-   - Scans 5 symbols (R_10, R_25, R_50, R_75, R_100) every 5 minutes
-   - Checks for active signals to enforce one-signal-per-asset rule
+   - Scans configured symbols every 5 minutes (cron)
+   - Does **not** skip a symbol just because another active signal exists; generation runs whenever the detector passes
    - Analyzes market data using advanced indicator-based detection
    - Generates signals only when quality thresholds are met
+   - Optionally upserts **`active_signal_registry`** so the registry points at the latest signal per symbol (informational, not blocking)
    - Records signal triggers for transparency
 
 2. **monitor-signal-outcomes** (Deployed)
-   - Monitors all active signals every 5 minutes
-   - Checks if TP1, TP2, TP3, or SL has been hit
-   - Automatically closes signals and records outcomes
-   - Removes expired signals
-   - Updates active signal registry
+   - Monitors **open `trades`** (per-user SL/TP on each row) against Deriv ticks
+   - Closes **trades** when TP/SL is hit (does not close the shared **`signals`** row for everyone)
+   - **Expires** overdue **`signals`** (`expires_at` past) via `update_signal_outcome` / `EXPIRED`
+   - Updates **`price_monitor_schedule`** with current active signal count
 
 ### Database Tables
 
 - **signals**: Main signals table with lifecycle tracking
 - **active_signal_registry**: Tracks which symbols have active signals
 - **signal_triggers**: Logs which indicators triggered each signal
-- **signal_outcomes**: Records signal results for performance analysis
+- **signal_outcomes**: Legacy/global table (one row per signal); **user performance** should use **`trades`** (closed rows with `profit_loss` per user)
 
 ## Setup Instructions
 
@@ -144,8 +144,7 @@ Check the edge function logs in your Supabase dashboard:
 ### Signal Generation Flow
 
 1. Every 5 minutes, `auto-generate-signals` runs
-2. For each symbol (R_10, R_25, R_50, R_75, R_100):
-   - Check if symbol already has an active signal → Skip if yes
+2. For each configured symbol:
    - Fetch 200 historical ticks from Deriv API
    - Run advanced indicator analysis (RSI, MACD, Bollinger Bands, EMA crossovers, trends)
    - Detect candlestick patterns (engulfing, hammer, morning star, etc.)
@@ -159,16 +158,14 @@ Check the edge function logs in your Supabase dashboard:
 ### Signal Monitoring Flow
 
 1. Every 5 minutes, `monitor-signal-outcomes` runs
-2. Fetch all active signals
-3. For each signal:
+2. Fetch **open trades** (with linked signal for Deriv `symbol` code)
+3. For each trade:
    - Get current market price from Deriv
-   - Check if TP1, TP2, TP3, or SL has been hit
-   - If outcome detected:
-     - Calculate profit/loss
-     - Update signal status to CLOSED
-     - Record outcome in signal_outcomes table
-     - Remove from active_signal_registry
-4. Check for expired signals and close them
+   - Compare price to **that trade’s** `stop_loss` / `take_profit` (user-specific)
+   - If TP or SL hit: close the **trade** row only (idempotent `status = open` update)
+4. Check for **expired signals** (`expires_at` past) and mark those **`signals`** rows inactive via `update_signal_outcome` (`EXPIRED`)
+
+**MT5 path:** When the EA reports a closed trade (`mt5-report-trade` / `mt5-report-positions`), only **`trades`** are updated — the shared **`signals`** row is not closed for all users.
 
 ## Signal Quality Thresholds
 

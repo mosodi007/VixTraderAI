@@ -1,6 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { getPointSize } from "../_shared/symbol-sl-tp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -200,44 +199,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // If MT5 closed the trade, immediately close the linked signal in DB.
-    // This is more accurate than Deriv tick monitoring (which can lag/mismatch MT5 execution).
-    if (status === "closed") {
-      const { data: sig } = await supabase
-        .from("signals")
-        .select("id, symbol, direction, entry_price, stop_loss, tp1, take_profit, is_active, signal_status")
-        .eq("id", signal_id)
-        .maybeSingle();
-
-      if (sig?.id) {
-        const entry = Number(sig.entry_price);
-        const slDb = Number(sig.stop_loss);
-        const tpDb = Number((sig as any).tp1 ?? sig.take_profit);
-        const exit = exit_price ?? entry_price ?? entry;
-
-        const pointSize = getPointSize(String(sig.symbol || symbol));
-        const buffer = pointSize; // require pass by at least one point
-
-        let outcome = "closed";
-        if (sig.direction === "BUY") {
-          if (Number.isFinite(tpDb) && tpDb > entry && exit >= tpDb + buffer) outcome = "TP1_HIT";
-          else if (Number.isFinite(slDb) && slDb < entry && exit <= slDb) outcome = "SL_HIT";
-          else outcome = profit_loss >= 0 ? "TP1_HIT" : "SL_HIT";
-        } else {
-          if (Number.isFinite(tpDb) && tpDb < entry && exit <= tpDb - buffer) outcome = "TP1_HIT";
-          else if (Number.isFinite(slDb) && slDb > entry && exit >= slDb) outcome = "SL_HIT";
-          else outcome = profit_loss >= 0 ? "TP1_HIT" : "SL_HIT";
-        }
-
-        // Close signal using existing DB function (updates is_active/signal_status/outcome + registry)
-        await supabase.rpc("update_signal_outcome", {
-          p_signal_id: sig.id,
-          p_outcome: outcome,
-          p_close_price: exit,
-          p_profit_loss: profit_loss,
-        });
-      }
-    }
+    // Shared `signals` rows are not closed when a single user's trade closes; outcomes are per-user on `trades`.
 
     return new Response(
       JSON.stringify({ success: true }),

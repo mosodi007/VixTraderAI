@@ -31,7 +31,30 @@ type SymbolSettings = {
   lot_mode: LotMode;
   fixed_lot: number;
   percent: number;
+  sl_points?: number | null;
+  tp_points?: number | null;
 };
+
+const SYMBOL_POINT_SIZE: Record<string, number> = {
+  R_10: 0.4,
+  R_25: 0.4,
+  R_50: 0.4,
+  R_75: 0.4,
+  R_100: 0.4,
+  stpRNG: 0.01,
+  "1HZ10V": 0.01,
+  "1HZ30V": 0.01,
+  "1HZ50V": 0.01,
+  "1HZ75V": 0.01,
+  "1HZ90V": 0.01,
+  "1HZ100V": 0.01,
+  JD25: 0.01,
+  STPIDX: 0.01,
+};
+
+function getPointSize(symbol: string): number {
+  return SYMBOL_POINT_SIZE[String(symbol || "").trim()] ?? 0.01;
+}
 
 // Default minimum lots (Deriv MT5) for convenience; EA also clamps to broker min/max/step at execution time.
 const SYMBOL_MIN_LOT: Record<string, number> = {
@@ -264,7 +287,7 @@ Deno.serve(async (req: Request) => {
     // Load per-symbol settings for this mt5_login. Keyed by Deriv symbol code (e.g., "R_50").
     const { data: symbolRows, error: symErr } = await supabase
       .from("mt5_symbol_settings")
-      .select("symbol, trade_enabled, lot_mode, fixed_lot, percent")
+      .select("symbol, trade_enabled, lot_mode, fixed_lot, percent, sl_points, tp_points")
       .eq("user_id", acct.user_id)
       .eq("mt5_login", mt5_loginStored);
     if (symErr) {
@@ -279,6 +302,8 @@ Deno.serve(async (req: Request) => {
         lot_mode: ((r as any).lot_mode === "percent_balance" ? "percent_balance" : "fixed") as LotMode,
         fixed_lot: Math.max(0, Number((r as any).fixed_lot) || 0.01),
         percent: Math.max(0, Math.min(100, Number((r as any).percent) || 0)),
+        sl_points: (r as any).sl_points,
+        tp_points: (r as any).tp_points,
       });
     }
 
@@ -331,8 +356,29 @@ Deno.serve(async (req: Request) => {
       }
 
       const tp = s.tp1 ?? s.take_profit;
-      const sl = Number(s.stop_loss);
-      const tpVal = Number(tp);
+      let sl = Number(s.stop_loss);
+      let tpVal = Number(tp);
+
+      const entryPrice = Number(s.entry_price) || 0;
+      const userSlPts = settings?.sl_points;
+      const userTpPts = settings?.tp_points;
+      if (userSlPts != null && Number(userSlPts) > 0 && entryPrice > 0) {
+        const slPoints = Math.max(1, Number(userSlPts));
+        const tpPoints =
+          userTpPts != null && Number(userTpPts) > 0 ? Math.max(1, Number(userTpPts)) : slPoints * 3;
+        const pointSize = getPointSize(symbolCode);
+        const slDist = slPoints * pointSize;
+        const tpDist = tpPoints * pointSize;
+        const dirUp = String(s.direction).toUpperCase();
+        if (dirUp === "BUY") {
+          sl = entryPrice - slDist;
+          tpVal = entryPrice + tpDist;
+        } else {
+          sl = entryPrice + slDist;
+          tpVal = entryPrice - tpDist;
+        }
+      }
+
       if (!Number.isFinite(sl) || !Number.isFinite(tpVal) || sl <= 0 || tpVal <= 0) {
         recordSkip("invalid_sl_or_tp", id, symbolCode);
         continue;

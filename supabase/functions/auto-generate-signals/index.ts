@@ -23,7 +23,9 @@ interface AutoSignalResult {
 
 const SYMBOL_POINT_SIZE: Record<string, number> = {
   R_10: 0.4,
+  R_25: 0.4,
   R_50: 0.4,
+  R_75: 0.4,
   R_100: 0.4,
   stpRNG: 0.01,
   "1HZ10V": 0.01,
@@ -83,7 +85,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // List of symbols to monitor
-    const symbols = ['1HZ30V'];
+    const symbols = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ30V', '1HZ75V', '1HZ100V'];
     const timeframe = 'M15';
 
     const results: AutoSignalResult[] = [];
@@ -94,39 +96,7 @@ Deno.serve(async (req: Request) => {
     // Process symbols in parallel for faster execution
     const symbolPromises = symbols.map(async (symbol) => {
       try {
-        // Check if symbol already has an active signal
-        const { data: existingRegistry } = await supabase
-          .from('active_signal_registry')
-          .select('*')
-          .eq('symbol', symbol)
-          .maybeSingle();
-
-        if (existingRegistry) {
-          console.log(`[${symbol}] Already has active signal. Skipping.`);
-          return {
-            symbol,
-            signalGenerated: false,
-            reason: 'Symbol already has an active signal. Waiting for current signal to close.'
-          };
-        }
-
-        // Also check signals table for active signals
-        const { data: activeSignals } = await supabase
-          .from('signals')
-          .select('id')
-          .eq('symbol', symbol)
-          .eq('is_active', true)
-          .gt('expires_at', new Date().toISOString());
-
-        if (activeSignals && activeSignals.length > 0) {
-          console.log(`[${symbol}] Has active signals in database. Skipping.`);
-          return {
-            symbol,
-            signalGenerated: false,
-            reason: 'Symbol has active signals. One signal per asset rule enforced.'
-          };
-        }
-
+        // Multiple concurrent signals per symbol are allowed; outcomes are tracked per-user on `trades`.
         // Fetch market data from Deriv
         const derivAPI = createDerivAPI();
         console.log(`[${symbol}] Fetching market data...`);

@@ -5,8 +5,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Target, XCircle, Clock, BarChart3, Award } from 'lucide-react';
 
+/** One row per closed trade (user-specific SL/TP), joined with signal metadata for display. */
 interface PastSignal {
   id: string;
+  trade_id: string;
   symbol: string;
   mt5_symbol: string | null;
   direction: string;
@@ -24,6 +26,36 @@ interface PastSignal {
   accuracy_percentage: number | null;
   created_at: string;
   closed_at: string | null;
+  profit_loss?: number | null;
+}
+
+function deriveOutcomeFromTrade(
+  profitLoss: number | null | undefined,
+  exitPrice: number | null | undefined,
+  entry: number,
+  sl: number,
+  tp: number,
+  direction: string,
+): string | null {
+  const pl = profitLoss != null ? Number(profitLoss) : NaN;
+  if (Number.isFinite(pl)) {
+    if (pl > 0) return 'tp1_hit';
+    if (pl < 0) return 'sl_hit';
+    return 'breakeven';
+  }
+  const exit = exitPrice != null ? Number(exitPrice) : NaN;
+  const dir = String(direction || '').toUpperCase();
+  if (!Number.isFinite(exit) || !Number.isFinite(sl) || !Number.isFinite(tp) || !Number.isFinite(entry)) {
+    return null;
+  }
+  if (dir === 'BUY') {
+    if (tp > entry && exit >= tp) return 'tp1_hit';
+    if (sl < entry && exit <= sl) return 'sl_hit';
+  } else if (dir === 'SELL') {
+    if (tp < entry && exit <= tp) return 'tp1_hit';
+    if (sl > entry && exit >= sl) return 'sl_hit';
+  }
+  return null;
 }
 
 interface AccuracyStats {
@@ -49,27 +81,129 @@ export function PastSignals() {
   }, [user]);
 
   const loadPastSignals = async () => {
-    const { data } = await supabase
-      .from('signals')
-      .select('*')
-      .not('outcome', 'is', null)
+    if (!user?.id) {
+      setSignals([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('trades')
+      .select(
+        `
+        id,
+        entry_price,
+        stop_loss,
+        take_profit,
+        direction,
+        signal_id,
+        exit_price,
+        profit_loss,
+        closed_at,
+        opened_at,
+        created_at,
+        signals (
+          signal_type,
+          symbol,
+          mt5_symbol,
+          tp1,
+          tp2,
+          tp3,
+          take_profit,
+          order_type,
+          confidence,
+          confidence_percentage,
+          trigger_count,
+          created_at
+        )
+      `,
+      )
+      .eq('user_id', user.id)
+      .eq('status', 'closed')
+      .not('signal_id', 'is', null)
       .order('closed_at', { ascending: false })
       .limit(100);
 
-    if (data) {
-      setSignals(data);
-      calculateStats(data);
+    if (error) {
+      console.error('[PastSignals]', error);
+      setSignals([]);
+      setStats({ total: 0, successful: 0, failed: 0, accuracy: 0 });
+      setLoading(false);
+      return;
     }
+
+    const rows = (data || []) as Array<{
+      id: string;
+      entry_price: number;
+      stop_loss: number | null;
+      take_profit: number | null;
+      direction: string;
+      exit_price: number | null;
+      profit_loss: number | null;
+      closed_at: string | null;
+      created_at: string;
+      signals: Record<string, unknown> | null;
+    }>;
+
+    const mapped: PastSignal[] = rows.map((t) => {
+      const sig = (t.signals || {}) as Record<string, unknown>;
+      const entry = Number(t.entry_price) || 0;
+      const sl = Number(t.stop_loss ?? 0);
+      const tp = Number(t.take_profit ?? sig.take_profit ?? 0);
+      const outcome = deriveOutcomeFromTrade(
+        t.profit_loss,
+        t.exit_price,
+        entry,
+        sl,
+        tp,
+        t.direction,
+      );
+      return {
+        id: t.id,
+        trade_id: t.id,
+        symbol: String(sig.symbol ?? ''),
+        mt5_symbol: sig.mt5_symbol != null ? String(sig.mt5_symbol) : null,
+        direction: String(t.direction || ''),
+        entry_price: entry,
+        stop_loss: sl,
+        take_profit: tp,
+        tp1: sig.tp1 != null ? Number(sig.tp1) : null,
+        tp2: sig.tp2 != null ? Number(sig.tp2) : null,
+        tp3: sig.tp3 != null ? Number(sig.tp3) : null,
+        order_type: String(sig.order_type ?? 'MARKET'),
+        confidence: Number(sig.confidence ?? 0),
+        confidence_percentage:
+          sig.confidence_percentage != null ? Number(sig.confidence_percentage) : null,
+        trigger_count: sig.trigger_count != null ? Number(sig.trigger_count) : null,
+        outcome,
+        accuracy_percentage: null,
+        created_at: String(sig.created_at ?? t.created_at),
+        closed_at: t.closed_at,
+        profit_loss: t.profit_loss,
+      };
+    });
+
+    setSignals(mapped);
+    calculateStats(mapped);
     setLoading(false);
   };
 
   const calculateStats = (signalsData: PastSignal[]) => {
     const total = signalsData.length;
-    const successful = signalsData.filter((s) =>
-      s.outcome === 'tp1_hit' || s.outcome === 'tp2_hit' || s.outcome === 'tp3_hit'
-    ).length;
-    const failed = signalsData.filter((s) => s.outcome === 'sl_hit').length;
-    const accuracy = total > 0 ? (successful / total) * 100 : 0;
+    const successful = signalsData.filter((s) => {
+      const o = String(s.outcome || '').toLowerCase();
+      if (o === 'tp1_hit' || o === 'tp2_hit' || o === 'tp3_hit') return true;
+      const pl = s.profit_loss != null ? Number(s.profit_loss) : NaN;
+      return Number.isFinite(pl) && pl > 0;
+    }).length;
+    const failed = signalsData.filter((s) => {
+      const o = String(s.outcome || '').toLowerCase();
+      if (o === 'sl_hit') return true;
+      const pl = s.profit_loss != null ? Number(s.profit_loss) : NaN;
+      return Number.isFinite(pl) && pl < 0;
+    }).length;
+    const decided = successful + failed;
+    const accuracy = decided > 0 ? (successful / decided) * 100 : 0;
 
     setStats({ total, successful, failed, accuracy });
   };
@@ -97,6 +231,13 @@ export function PastSignals() {
           <span className="inline-flex items-center gap-1 px-3 py-1 bg-slate-500/15 text-slate-700 dark:text-slate-300 dark:bg-slate-500/20 rounded-full text-xs font-semibold">
             <Clock className="w-3 h-3" />
             Expired
+          </span>
+        );
+      case 'breakeven':
+        return (
+          <span className="inline-flex items-center gap-1 px-3 py-1 bg-amber-500/15 text-amber-800 dark:text-amber-300 dark:bg-amber-500/20 rounded-full text-xs font-semibold">
+            <Target className="w-3 h-3" />
+            Breakeven
           </span>
         );
       default:
@@ -128,7 +269,7 @@ export function PastSignals() {
               Past Signals
             </h2>
             <p className="text-sm sm:text-base text-slate-600 dark:text-slate-400">
-              Historical signal performance and accuracy tracking
+              Your closed trades from signals (your SL/TP and results)
             </p>
           </div>
 
@@ -194,7 +335,7 @@ export function PastSignals() {
             <div className="px-4 py-4 sm:p-6 border-b border-slate-200 dark:border-slate-700">
               <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">Signal History</h3>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
-                All closed signals with outcomes
+                Closed trades linked to signals — outcomes use your levels and P/L
               </p>
             </div>
 
@@ -209,7 +350,7 @@ export function PastSignals() {
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">No Past Signals</h3>
                 <p className="text-slate-600 dark:text-slate-400">
-                  Closed signals will appear here once they reach TP or SL
+                  Closed trades will appear here after your EA reports a close or the monitor resolves TP/SL
                 </p>
               </div>
             ) : (
