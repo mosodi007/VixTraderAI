@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import logoLight from '../assets/Vixai-logo.png';
 import logoDark from '../assets/Vixai-logo-dark.png';
-import { CheckCircle2, Shield, Zap, LineChart, Settings2, Headphones, TrendingUp, Hand, Target } from 'lucide-react';
+import { CheckCircle2, Zap, LineChart, TrendingUp, Hand, Target, Sun, Moon } from 'lucide-react';
 
 const FeatureItem = ({ title, description }: { title: string; description: string }) => (
   <div className="flex gap-3">
@@ -34,7 +34,7 @@ const FaqItem = ({ q, a }: { q: string; a: string }) => (
 );
 
 export function Landing() {
-  const { theme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
     const scriptId = 'tawk-widget-script';
@@ -77,6 +77,14 @@ export function Landing() {
           </a>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="inline-flex items-center justify-center p-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
             <a
               href="#login"
               className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-medium"
