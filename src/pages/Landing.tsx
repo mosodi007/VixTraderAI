@@ -111,7 +111,7 @@ export function Landing() {
           <div className="relative max-w-5xl mx-auto px-4 pt-12 pb-16 md:pt-16 md:pb-20 text-center">
             <p className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-slate-200/90 dark:border-slate-700/90 bg-white/80 dark:bg-slate-900/60 backdrop-blur-sm text-xs font-medium text-slate-700 dark:text-slate-300 shadow-sm">
               <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              Volatility indices • Deriv MT5 • AI-assisted execution
+              Volatility indices • Deriv MT5 • EA-assisted execution
             </p>
 
             <h1 className="mt-6 text-4xl sm:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.1]">
