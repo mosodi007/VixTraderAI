@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { resolveMt5Account } from "../_shared/resolve-mt5-account.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -85,11 +86,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const { data: acct } = await supabase
-      .from("mt5_accounts")
-      .select("user_id, account_type, verified, verification_status")
-      .eq("mt5_login", mt5_login)
-      .maybeSingle();
+    const acct = await resolveMt5Account(supabase, mt5_login);
 
     if (!acct?.user_id) {
       // Demo mode: allow unregistered demo accounts; ignore reports.
@@ -129,11 +126,13 @@ Deno.serve(async (req: Request) => {
     const ticket = body.ticket != null ? String(body.ticket) : null;
     const error_message = body.error_message != null ? String(body.error_message) : null;
 
+    const mt5_loginStored = acct.mt5_login ?? mt5_login;
+
     // Find recent rows for this signal/account; duplicates may exist from old dispatch behavior.
     const { data: existingRows, error: existingErr } = await supabase
       .from("trades")
       .select("id,status,created_at")
-      .eq("mt5_login", mt5_login)
+      .eq("mt5_login", mt5_loginStored)
       .eq("signal_id", signal_id)
       .order("created_at", { ascending: false })
       .limit(20);
@@ -148,7 +147,7 @@ Deno.serve(async (req: Request) => {
     if (!existing?.id) {
       const { error } = await supabase.from("trades").insert({
         user_id: acct.user_id,
-        mt5_login,
+        mt5_login: mt5_loginStored,
         signal_id,
         symbol,
         direction,
@@ -190,7 +189,7 @@ Deno.serve(async (req: Request) => {
             closed_at: nowIso,
             profit_loss: profit_loss || 0,
           })
-          .eq("mt5_login", mt5_login)
+          .eq("mt5_login", mt5_loginStored)
           .eq("signal_id", signal_id)
           .in("status", ["sent", "open"]);
         if (closeDupErr) {

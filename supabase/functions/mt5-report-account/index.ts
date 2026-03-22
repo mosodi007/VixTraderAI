@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { resolveMt5Account } from "../_shared/resolve-mt5-account.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -85,11 +86,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const { data: acct } = await supabase
-      .from("mt5_accounts")
-      .select("user_id, mt5_login, account_type, verified, verification_status")
-      .eq("mt5_login", mt5_login)
-      .maybeSingle();
+    const acct = await resolveMt5Account(supabase, mt5_login);
 
     if (!acct?.user_id) {
       // Demo mode: allow unregistered demo accounts; treat as no-op success.
@@ -129,11 +126,13 @@ Deno.serve(async (req: Request) => {
       last_sync: new Date().toISOString(),
     };
 
+    const mt5_loginStored = acct.mt5_login ?? mt5_login;
+
     const { error: updateError } = await supabase
       .from("mt5_accounts")
       .update(payload)
       .eq("user_id", acct.user_id)
-      .eq("mt5_login", acct.mt5_login);
+      .eq("mt5_login", mt5_loginStored);
 
     if (updateError) throw updateError;
 

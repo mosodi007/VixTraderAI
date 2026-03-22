@@ -34,9 +34,6 @@ input bool   AllowNewTrades      = true;
 //--- prevent duplicates in-session
 string executedSignalIds[];
 
-//--- auth state
-bool gUnauthorized = false;
-
 //--- mapping: position_ticket -> signal_id (in-memory)
 long   mapTickets[];
 string mapSignalIds[];
@@ -583,7 +580,6 @@ void ExecuteInstruction(const string obj)
 
 void PollBackend()
 {
-  if(gUnauthorized) return;
   string login = IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN));
   string body  = "{"
     "\"mt5_login\":\""+login+"\","
@@ -595,13 +591,16 @@ void PollBackend()
   if(!HttpPost(ApiUrlInstructions, body, resp, st)) return;
   if(st==401)
   {
-    string errMsg="";
-    if(!ExtractStringField(resp, "error", errMsg) || StringLen(errMsg)==0)
-      errMsg="Unauthorized";
-    Log(errMsg);
-    Alert(errMsg);
-    gUnauthorized = true;
-    EventKillTimer();
+    static datetime s_last401Log = 0;
+    if(TimeCurrent() - s_last401Log >= 60)
+    {
+      string errMsg="";
+      if(!ExtractStringField(resp, "error", errMsg) || StringLen(errMsg)==0)
+        errMsg="Unauthorized";
+      Log(errMsg + " (polling continues; add/approve this MT5 login in the app if needed)");
+      Alert(errMsg);
+      s_last401Log = TimeCurrent();
+    }
     return;
   }
   if(st!=200)
@@ -640,7 +639,6 @@ void OnDeinit(const int reason)
 
 void OnTimer()
 {
-  if(gUnauthorized) return;
   PollBackend();
   PushAccountSnapshot();
   PushPositionsSnapshot();

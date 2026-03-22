@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { resolveMt5Account } from "../_shared/resolve-mt5-account.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -117,11 +118,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const { data: acct } = await supabase
-      .from("mt5_accounts")
-      .select("user_id, account_type, verified, verification_status")
-      .eq("mt5_login", mt5_login)
-      .maybeSingle();
+    const acct = await resolveMt5Account(supabase, mt5_login);
 
     if (!acct?.user_id) {
       // Demo mode: allow unregistered demo accounts; ignore reports.
@@ -135,6 +132,8 @@ Deno.serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const mt5_loginStored = acct.mt5_login ?? mt5_login;
 
     const t = String((acct as any).account_type || "").toLowerCase();
     const typeOk = ea_mode === "demo" ? t === "demo" : t === "real" || t === "live";
@@ -181,10 +180,14 @@ Deno.serve(async (req: Request) => {
         .from("mt5_positions")
         .delete()
         .eq("user_id", acct.user_id)
-        .eq("mt5_login", mt5_login)
+        .eq("mt5_login", mt5_loginStored)
         .not("ticket", "in", `(${ticketList.map((t) => `"${t}"`).join(",")})`);
     } else {
-      await supabase.from("mt5_positions").delete().eq("user_id", acct.user_id).eq("mt5_login", mt5_login);
+      await supabase
+        .from("mt5_positions")
+        .delete()
+        .eq("user_id", acct.user_id)
+        .eq("mt5_login", mt5_loginStored);
     }
 
     // Upsert current positions
@@ -200,7 +203,7 @@ Deno.serve(async (req: Request) => {
 
       const row = {
         user_id: acct.user_id,
-        mt5_login,
+        mt5_login: mt5_loginStored,
         ticket,
         symbol,
         direction,
@@ -224,7 +227,7 @@ Deno.serve(async (req: Request) => {
         await supabase
           .from("trades")
           .update({ status: "open", ticket, symbol, direction })
-          .eq("mt5_login", mt5_login)
+          .eq("mt5_login", mt5_loginStored)
           .eq("signal_id", signalId)
           .in("status", ["sent", "open"]);
       }
@@ -248,7 +251,7 @@ Deno.serve(async (req: Request) => {
           profit_loss: profit,
           closed_at: closedAt,
         })
-        .eq("mt5_login", mt5_login)
+        .eq("mt5_login", mt5_loginStored)
         .eq("signal_id", signalId);
     }
 
@@ -257,7 +260,7 @@ Deno.serve(async (req: Request) => {
       .from("mt5_accounts")
       .update({ last_sync: nowIso })
       .eq("user_id", acct.user_id)
-      .eq("mt5_login", mt5_login);
+      .eq("mt5_login", mt5_loginStored);
 
     return new Response(JSON.stringify({ success: true, positions_count: positions.length }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

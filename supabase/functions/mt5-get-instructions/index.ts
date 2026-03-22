@@ -1,6 +1,7 @@
 // @ts-nocheck
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { resolveMt5Account } from "../_shared/resolve-mt5-account.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -197,62 +198,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // Find the account owner: MT5 often sends login without leading zeros; Settings may store padded digits.
-    const loginNorm = mt5_login.replace(/^0+/, "") || mt5_login;
-    let acct: {
-      user_id: string;
-      verified?: boolean;
-      verification_status?: string;
-      account_type?: string;
-      mt5_login?: string;
-    } | null = null;
-
-    const { data: acctExact } = await supabase
-      .from("mt5_accounts")
-      .select("user_id, verified, verification_status, account_type, mt5_login")
-      .eq("mt5_login", mt5_login)
-      .maybeSingle();
-    if (acctExact) acct = acctExact as any;
-
-    if (!acct && loginNorm !== mt5_login) {
-      const { data: byNorm } = await supabase
-        .from("mt5_accounts")
-        .select("user_id, verified, verification_status, account_type, mt5_login")
-        .eq("mt5_login", loginNorm)
-        .maybeSingle();
-      if (byNorm) acct = byNorm as any;
-    }
-
-    const canonicalLogin = (s: string) => {
-      const t = String(s || "").trim();
-      return t.replace(/^0+/, "") || t;
-    };
-
-    if (!acct) {
-      const { data: rpcRows, error: rpcErr } = await supabase.rpc("mt5_accounts_match_login", {
-        p_login: mt5_login,
-      });
-      if (!rpcErr && rpcRows != null) {
-        const arr = Array.isArray(rpcRows) ? rpcRows : [rpcRows];
-        if (arr.length > 0) acct = arr[0] as any;
-      }
-      if (rpcErr) {
-        console.warn("[mt5-get-instructions] mt5_accounts_match_login RPC:", rpcErr.message);
-      }
-    }
-
-    // Fallback if RPC not deployed yet: scan by canonical login (mt5_login is globally unique).
-    if (!acct) {
-      const target = canonicalLogin(mt5_login);
-      const { data: scanRows, error: scanErr } = await supabase
-        .from("mt5_accounts")
-        .select("user_id, verified, verification_status, account_type, mt5_login")
-        .limit(3000);
-      if (!scanErr && scanRows?.length) {
-        acct =
-          (scanRows as any[]).find((r) => canonicalLogin(String(r.mt5_login || "")) === target) ??
-          null;
-      }
-    }
+    const acct = await resolveMt5Account(supabase, mt5_login);
 
     if (!acct || !acct.user_id) {
       return new Response(
