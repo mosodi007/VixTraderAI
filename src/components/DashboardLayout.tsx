@@ -1,7 +1,8 @@
 import { ReactNode, useEffect, useState } from 'react';
+import { openTawkChat } from './TawkWidget';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, Sun, Moon, Bell, BellRing, MessageCircle, History } from 'lucide-react';
+import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, Sun, Moon, Bell, BellRing, MessageCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { playNewSignalAlert, unlockAudio } from '../lib/soundAlert';
 import logoLight from '../assets/Vixai-logo.png';
@@ -17,7 +18,6 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
-  const [chatOpen, setChatOpen] = useState(false);
 
   const navigation = [
     { name: 'Dashboard', icon: Home, page: 'home' },
@@ -180,9 +180,9 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setChatOpen(true)}
+                  onClick={() => openTawkChat()}
                   className="relative inline-flex items-center justify-center rounded-full p-2 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors"
-                  aria-label="Open chat help"
+                  aria-label="Open live chat"
                 >
                   <MessageCircle className="w-5 h-5" />
                 </button>
@@ -228,29 +228,6 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
           </main>
         </div>
       </div>
-      {chatOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-4xl h-[80vh] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Help Chat</h3>
-              <button
-                type="button"
-                onClick={() => setChatOpen(false)}
-                className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-                aria-label="Close chat"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <iframe
-              title="Tawk chat"
-              src="https://tawk.to/chat/69bd93521f2eee1c3a8ff055/1jk68euv3"
-              className="w-full h-[calc(80vh-49px)] border-0"
-              allow="clipboard-write; microphone; camera"
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

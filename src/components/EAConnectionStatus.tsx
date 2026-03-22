@@ -312,7 +312,7 @@ export function EAConnectionStatus({ userId, tradingMode }: EAConnectionStatusPr
                   <div>
                     <h4 className="text-black dark:text-white font-bold">MT5 #{connection.mt5_login}</h4>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className={`text-xs font-medium ${health.color}. Now Trading!`}>
+                      <span className={`text-xs font-medium ${health.color}`}>
                         {health.message}
                       </span>
                       {connection.version && (

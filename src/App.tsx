@@ -13,6 +13,7 @@ import { LiveAnalysis } from './pages/LiveAnalysis';
 import { TermsOfService } from './pages/TermsOfService';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import { VerifyEmail } from './pages/VerifyEmail';
+import { TawkWidget } from './components/TawkWidget';
 
 function AppRoutes() {
   const { user, loading, profile } = useAuth();
@@ -123,6 +124,7 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <TawkWidget />
         <AppRoutes />
       </AuthProvider>
     </ThemeProvider>
