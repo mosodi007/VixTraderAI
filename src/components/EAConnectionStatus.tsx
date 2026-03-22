@@ -18,6 +18,12 @@ interface EAConnectionStatusProps {
   tradingMode: TradingMode;
 }
 
+/** Match MT5 logins when one side has leading zeros (EA vs saved login). */
+function normalizeMt5Login(s: string): string {
+  const t = String(s || '').trim();
+  return t.replace(/^0+/, '') || t;
+}
+
 export function EAConnectionStatus({ userId, tradingMode }: EAConnectionStatusProps) {
   const [connections, setConnections] = useState<EAConnection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,36 +53,40 @@ export function EAConnectionStatus({ userId, tradingMode }: EAConnectionStatusPr
     };
   }, [userId, tradingMode]);
 
-  const loadModeLogins = async (): Promise<string[]> => {
+  /** Accounts for current trading mode (raw mt5_login as stored in DB). */
+  const loadModeAccounts = async (): Promise<{ raw: string }[]> => {
     const { data } = await supabase
       .from('mt5_accounts')
       .select('mt5_login,account_type')
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
     const rows = (data as any[]) || [];
-    const logins = rows
+    return rows
       .filter((r) => (tradingMode === 'demo' ? r?.account_type === 'demo' : r?.account_type === 'real' || r?.account_type === 'live'))
-      .map((r) => String(r.mt5_login || '').trim())
-      .filter(Boolean);
-    return logins;
+      .map((r) => ({ raw: String(r.mt5_login || '').trim() }))
+      .filter((a) => a.raw.length > 0);
   };
 
   const loadConnections = async () => {
-    const logins = await loadModeLogins();
-    if (logins.length === 0) {
+    const accounts = await loadModeAccounts();
+    if (accounts.length === 0) {
       setConnections([]);
       setLoading(false);
       return;
     }
 
-    const { data } = await supabase
+    const normSet = new Set(accounts.map((a) => normalizeMt5Login(a.raw)));
+
+    const { data: allRows } = await supabase
       .from('ea_connections')
       .select('*')
       .eq('user_id', userId)
-      .in('mt5_login', logins)
       .order('updated_at', { ascending: false });
 
-    setConnections(data || []);
+    // Match heartbeats to mode accounts even if ea_connections.mt5_login differs by leading zeros from mt5_accounts.
+    const matched = (allRows || []).filter((c) => normSet.has(normalizeMt5Login(String(c.mt5_login || ''))));
+
+    setConnections(matched);
     setLoading(false);
   };
 
