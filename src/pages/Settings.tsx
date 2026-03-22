@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Save, AlertCircle, CheckCircle, BarChart3 } from 'lucide-react';
 import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
+import { DemoAccountApprovedModal } from '../components/DemoAccountApprovedModal';
 
 // Keep in sync with `supabase/functions/auto-generate-signals/index.ts` monitored symbols.
 const SYMBOLS = ['R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ30V', '1HZ75V', '1HZ100V'] as const;
@@ -144,6 +145,15 @@ export function Settings() {
   const [emailSignalsLoading, setEmailSignalsLoading] = useState(false);
   const [emailSignalsMessage, setEmailSignalsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const [showDemoApprovedModal, setShowDemoApprovedModal] = useState(false);
+
+  const dismissDemoApprovedModal = () => {
+    setShowDemoApprovedModal(false);
+    if (user?.id && typeof localStorage !== 'undefined') {
+      localStorage.setItem(`vixai_demo_approval_modal_done_${user.id}`, '1');
+    }
+  };
+
   useEffect(() => {
     loadDemoAndLiveAccounts();
     loadMt5Accounts();
@@ -173,6 +183,8 @@ export function Settings() {
     const l =
       rows.find((r: any) => r.account_type === 'real' || r.account_type === 'live') ?? null;
 
+    let shouldShowDemoApprovedModal = false;
+
     // Demo accounts are auto-approved (no manual verification required)
     if (d && !isMt5AccountApproved(d)) {
       const nowIso = new Date().toISOString();
@@ -187,7 +199,14 @@ export function Settings() {
         .eq('id', d.id)
         .select('*')
         .maybeSingle();
-      if (updated) d = updated as any;
+      if (updated) {
+        d = updated as any;
+        const dismissed =
+          typeof localStorage !== 'undefined' && user?.id
+            ? localStorage.getItem(`vixai_demo_approval_modal_done_${user.id}`)
+            : null;
+        if (!dismissed) shouldShowDemoApprovedModal = true;
+      }
     }
 
     setDemoAccount(d);
@@ -195,6 +214,10 @@ export function Settings() {
     setDemoLogin(d?.mt5_login ?? '');
     setLiveLogin(l?.mt5_login ?? '');
     setLiveProduct(l ? SERVER_TO_MT5_PRODUCT(String(l.server || 'Deriv-Server')) : 'MT5_STD');
+
+    if (shouldShowDemoApprovedModal && tradingMode === 'demo') {
+      setShowDemoApprovedModal(true);
+    }
   };
 
   const loadMt5Accounts = async () => {
@@ -577,6 +600,7 @@ export function Settings() {
       }
       await loadDemoAndLiveAccounts();
       await loadMt5Accounts();
+      if (tradingMode === 'demo') setShowDemoApprovedModal(true);
     } catch (err: any) {
       setDemoMessage({ type: 'error', text: formatMt5SaveError(err) || err.message || 'Failed to save demo account' });
     } finally {
@@ -1258,6 +1282,7 @@ export function Settings() {
           )}
         </div>
       </DashboardLayout>
+      <DemoAccountApprovedModal open={showDemoApprovedModal} onClose={dismissDemoApprovedModal} />
     </ProtectedRoute>
   );
 }
