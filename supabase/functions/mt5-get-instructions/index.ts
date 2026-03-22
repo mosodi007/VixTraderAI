@@ -321,20 +321,29 @@ Deno.serve(async (req: Request) => {
     if (trErr) throw trErr;
     const executed = new Set((executedTrades || []).map((t: any) => String(t.signal_id)));
 
-    // One active trade slot per MT5 account: while any trade is still sent or open, only that
-    // signal may receive instructions — no parallel dispatches for other signals until SL/TP/close.
+    // One in-flight trade per Deriv symbol per MT5 account: sent/open on a symbol blocks other
+    // signals for that symbol only; other symbols can still receive instructions.
     const { data: inFlightTrades, error: ifErr } = await supabase
       .from("trades")
-      .select("signal_id,created_at")
+      .select("signal_id")
       .eq("mt5_login", mt5_loginStored)
       .in("status", ["sent", "open"])
-      .not("signal_id", "is", null)
-      .order("created_at", { ascending: true });
+      .not("signal_id", "is", null);
 
     if (ifErr) throw ifErr;
-    let singleActiveSignalId: string | null = null;
-    if (inFlightTrades && inFlightTrades.length > 0) {
-      singleActiveSignalId = String((inFlightTrades[0] as any).signal_id);
+    const inFlightIds = [...new Set((inFlightTrades || []).map((t: any) => String(t.signal_id)))];
+    const inFlightBySymbol = new Map<string, string>();
+    if (inFlightIds.length > 0) {
+      const { data: symRows, error: symErr } = await supabase
+        .from("signals")
+        .select("id, symbol")
+        .in("id", inFlightIds);
+      if (symErr) throw symErr;
+      for (const row of symRows || []) {
+        const sym = String((row as any).symbol || "").trim();
+        const sid = String((row as any).id);
+        if (sym) inFlightBySymbol.set(sym, sid);
+      }
     }
     const dispatchRetrySeconds = Math.max(15, Number(Deno.env.get("DISPATCH_RETRY_SECONDS") || 120));
 
@@ -347,6 +356,8 @@ Deno.serve(async (req: Request) => {
         skippedSignals.push({ signal_id: signalId, symbol, reason });
       }
     };
+    /** Avoid emitting two instructions for the same symbol in one response */
+    const symbolsDispatchedThisPoll = new Set<string>();
     for (const s of sigList) {
       const id = String(s.id);
       const symbolCode = String(s.symbol || "").trim();
@@ -354,8 +365,13 @@ Deno.serve(async (req: Request) => {
         recordSkip("already_executed", id, symbolCode);
         continue;
       }
-      if (singleActiveSignalId !== null && id !== singleActiveSignalId) {
-        recordSkip("one_active_trade_per_account", id, symbolCode);
+      const lockedForSymbol = inFlightBySymbol.get(symbolCode);
+      if (lockedForSymbol !== undefined && id !== lockedForSymbol) {
+        recordSkip("one_active_trade_per_symbol", id, symbolCode);
+        continue;
+      }
+      if (symbolsDispatchedThisPoll.has(symbolCode)) {
+        recordSkip("symbol_already_dispatched_this_poll", id, symbolCode);
         continue;
       }
       if (!s.symbol || !s.direction) {
@@ -516,8 +532,8 @@ Deno.serve(async (req: Request) => {
         magic: 123456,
         comment: `VIX_AI:${id}`,
       });
-      // One instruction per poll so the EA never receives multiple new signals at once (single active trade).
-      break;
+      symbolsDispatchedThisPoll.add(symbolCode);
+      if (instructions.length >= max) break;
     }
 
     console.log(`[mt5-get-instructions] mt5_login=${mt5_loginStored} active_signals=${sigList.length} already_executed=${executed.size} instructions=${instructions.length}`);

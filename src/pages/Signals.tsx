@@ -285,8 +285,8 @@ export function Signals() {
   const [mt5Connected, setMt5Connected] = useState<boolean | null>(null);
   const [isVerifiedMember, setIsVerifiedMember] = useState<boolean | null>(null);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
-  /** True when the list is narrowed to signal(s) tied to this user's sent/open trades */
-  const [hasOpenTradeSlot, setHasOpenTradeSlot] = useState(false);
+  /** True when at least one symbol has a sent/open trade (we lock that symbol to that signal in the list) */
+  const [hasPerSymbolTradeLock, setHasPerSymbolTradeLock] = useState(false);
 
   const checkMt5Connected = async () => {
     if (!user?.id) {
@@ -338,11 +338,14 @@ export function Signals() {
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
-    let list = data || [];
-    setHasOpenTradeSlot(false);
+    const raw = data || [];
+    // One row per Deriv symbol: newest active signal, unless this user has a sent/open trade on that
+    // symbol — then show only that trade's signal until TP/SL/close.
+    const sorted = [...raw].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
 
-    // One active trade per account: while this user has sent/open trades, only show those signals
-    // (avoids a wall of duplicate market signals until their position closes).
+    const lockedBySymbol = new Map<string, string>();
     if (user?.id) {
       const { data: openTrades } = await supabase
         .from('trades')
@@ -350,13 +353,34 @@ export function Signals() {
         .eq('user_id', user.id)
         .in('status', ['sent', 'open'])
         .not('signal_id', 'is', null)
-        .limit(50);
-      const ids = [...new Set((openTrades || []).map((t: { signal_id: string }) => String(t.signal_id)))];
-      if (ids.length > 0) {
-        list = list.filter((s: Signal) => ids.includes(s.id));
-        setHasOpenTradeSlot(true);
+        .limit(100);
+      const openIds = [...new Set((openTrades || []).map((t: { signal_id: string }) => String(t.signal_id)))];
+      if (openIds.length > 0) {
+        const { data: symRows } = await supabase.from('signals').select('id, symbol').in('id', openIds);
+        for (const row of symRows || []) {
+          const sym = String((row as { symbol?: string }).symbol || '').trim();
+          const id = String((row as { id?: string }).id);
+          if (sym && id) lockedBySymbol.set(sym, id);
+        }
       }
     }
+
+    const seen = new Set<string>();
+    const list: Signal[] = [];
+    for (const s of sorted) {
+      const sym = String(s.symbol || '').trim();
+      if (!sym) {
+        list.push(s);
+        continue;
+      }
+      const locked = lockedBySymbol.get(sym);
+      if (locked && s.id !== locked) continue;
+      if (seen.has(sym)) continue;
+      seen.add(sym);
+      list.push(s);
+    }
+
+    setHasPerSymbolTradeLock(lockedBySymbol.size > 0);
     const prevIds = previousSignalIdsRef.current;
     const newIds = new Set(list.map((s: Signal) => s.id));
     const isSubsequentLoad = prevIds.size > 0;
@@ -578,9 +602,10 @@ export function Signals() {
                   <div>
                     <h3 className="text-lg font-bold text-black dark:text-white">Active Signals</h3>
                     <p className="text-sm text-slate-600 dark:text-slate-400">{activeSignalsList.length} Signal{activeSignalsList.length !== 1 ? 's' : ''} Available</p>
-                    {hasOpenTradeSlot && (
+                    {hasPerSymbolTradeLock && (
                       <p className="text-xs text-emerald-700 dark:text-emerald-400/90 mt-2 max-w-xl">
-                        Showing only your current trade (sent or open). More signals will appear after this position closes at SL/TP.
+                        One active signal per symbol: symbols with a sent/open trade show that position until
+                        TP/SL. Other symbols still show their latest signal.
                       </p>
                     )}
                   </div>
