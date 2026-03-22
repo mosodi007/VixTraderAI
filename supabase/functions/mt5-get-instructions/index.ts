@@ -333,6 +333,11 @@ Deno.serve(async (req: Request) => {
       }
     }
     const dispatchRetrySeconds = Math.max(15, Number(Deno.env.get("DISPATCH_RETRY_SECONDS") || 120));
+    // Skip stale ACTIVE signals on first dispatch (new EA / new account): avoids opening far from entry.
+    // Retries when a "sent" row already exist are still allowed. Set to 0 to disable.
+    const rawMaxAge = Deno.env.get("SIGNAL_INSTRUCTION_MAX_AGE_SECONDS");
+    const maxSignalAgeSec =
+      rawMaxAge === "" || rawMaxAge == null ? 300 : Number(rawMaxAge);
 
     const instructions: any[] = [];
     const skippedByReason: Record<string, number> = {};
@@ -454,6 +459,13 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      const signalCreatedMs = toMillis((s as any).created_at);
+      const signalAgeSec = signalCreatedMs > 0 ? (Date.now() - signalCreatedMs) / 1000 : 0;
+      if (maxSignalAgeSec > 0 && signalAgeSec > maxSignalAgeSec && !sentRow) {
+        recordSkip("signal_too_old_first_dispatch", id, symbolCode);
+        continue;
+      }
+
       let dispatchErr: any = null;
       if (sentRow?.id) {
         // Reuse stale sent row instead of creating a new duplicate.
@@ -518,6 +530,9 @@ Deno.serve(async (req: Request) => {
         percent_formula: "lots_per_1000",
         magic: 123456,
         comment: `VIX_AI:${id}`,
+        signal_created_at: (s as any).created_at ?? null,
+        signal_age_seconds: Math.floor(signalAgeSec),
+        is_retry_dispatch: sentRow ? 1 : 0,
       });
       symbolsDispatchedThisPoll.add(symbolCode);
       if (instructions.length >= max) break;
@@ -536,6 +551,7 @@ Deno.serve(async (req: Request) => {
           instructions_count: instructions.length,
           skipped_by_reason: skippedByReason,
           skipped_signals: skippedSignals,
+          signal_max_age_seconds: maxSignalAgeSec,
         },
         connection_registered: !upsertErr,
         ...(upsertErr && { connection_error: upsertErr.message }),

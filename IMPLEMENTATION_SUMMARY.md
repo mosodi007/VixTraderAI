@@ -52,6 +52,10 @@ A fully automated, real-time trading signal generation system that continuously 
 - Expires overdue **`signals`** by `expires_at` (`EXPIRED`)
 - EA reports (`mt5-report-trade` / `mt5-report-positions`) update **`trades`** only, not global signal closure for everyone
 
+### Stale signal protection (EA + `mt5-get-instructions`)
+- **Server**: `SIGNAL_INSTRUCTION_MAX_AGE_SECONDS` (default **300**) — skips **first** dispatch of ACTIVE signals older than this; **retries** (existing `sent` trade row) still receive instructions (`is_retry_dispatch: 1`).
+- **EA inputs**: `MaxSignalAgeSeconds` (default **300**, **0** = off), `EntryMaxDeviationPoints` (default **150**, **0** = off) — blocks opens when price has moved too far from `entry_price` (in symbol **points**).
+
 ### 7. Real-Time Frontend Updates
 - Live status indicator with pulsing animation
 - Countdown timer showing next scan time

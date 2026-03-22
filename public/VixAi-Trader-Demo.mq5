@@ -19,6 +19,9 @@ input string ApiToken            = "";
 //--- timing
 input int    PollIntervalSeconds = 5;   // also used as snapshot interval
 input int    HttpTimeoutMs       = 5000;
+//--- stale signal protection (server also skips old signals on first dispatch; is_retry_dispatch bypasses age)
+input int    MaxSignalAgeSeconds = 300;     // 0 = do not enforce age on EA
+input double EntryMaxDeviationPoints = 150; // 0 = off; max |market price - signal entry| in symbol points
 
 //--- execution
 input int    SlippagePoints      = 20;
@@ -462,6 +465,11 @@ void ExecuteInstruction(const string obj)
   ExtractNumberField(obj, "percent", percent);
   ExtractStringField(obj, "percent_formula", percent_formula);
 
+  double signal_age_seconds = 0;
+  ExtractNumberField(obj, "signal_age_seconds", signal_age_seconds);
+  double is_retry_dispatch = 0;
+  ExtractNumberField(obj, "is_retry_dispatch", is_retry_dispatch);
+
   if(!AllowNewTrades) { Log("Trades disabled. Skipping " + signal_id); return; }
   if(symbol=="" || direction=="") { Log("Invalid instruction missing symbol/direction"); return; }
   if(stop_loss<=0.0 || take_profit<=0.0) { Log("Instruction missing SL/TP for " + signal_id); return; }
@@ -483,6 +491,29 @@ void ExecuteInstruction(const string obj)
   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
 
   double price = (direction=="BUY" ? ask : bid);
+
+  if(MaxSignalAgeSeconds > 0 && is_retry_dispatch < 0.5 && signal_age_seconds > (double)MaxSignalAgeSeconds)
+  {
+    Log("Signal too old (" + DoubleToString(signal_age_seconds,0) + "s > " + IntegerToString(MaxSignalAgeSeconds) + "s). Skipping " + signal_id);
+    MarkExecuted(signal_id);
+    return;
+  }
+
+  if(EntryMaxDeviationPoints > 0.0 && entry_price > 0.0)
+  {
+    double pt = SymbolInfoDouble(symbol, SYMBOL_POINT);
+    if(pt > 0.0)
+    {
+      double distPts = MathAbs(price - entry_price) / pt;
+      if(distPts > EntryMaxDeviationPoints)
+      {
+        Log("Entry vs market too far (" + DoubleToString(distPts,1) + " pts > " + DoubleToString(EntryMaxDeviationPoints,1) + "). Skipping " + signal_id);
+        MarkExecuted(signal_id);
+        return;
+      }
+    }
+  }
+
   if(entry_price<=0.0) entry_price = price;
 
   double lots = ComputeLotsFromInstruction(symbol, lot_mode, fixed_lot, percent, percent_formula);
