@@ -86,7 +86,7 @@ export function Landing() {
             </p>
 
             <h1 className="mt-6 text-4xl sm:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-slate-900 dark:text-white leading-[1.1]">
-              AI Copy Trading & Signals Platform
+              High Win-Rate AI Signals
               <span className="block mt-1 sm:mt-2 bg-gradient-to-r from-emerald-700 to-emerald-500 dark:from-emerald-400 dark:to-emerald-300 bg-clip-text text-transparent">
               For Volatility Indices
               </span>
