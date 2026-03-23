@@ -993,6 +993,7 @@ export function Settings() {
             )}
           </div>
 
+          {/*
           <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-emerald-500" />
@@ -1089,6 +1090,7 @@ export function Settings() {
               </button>
             </form>
           </div>
+          */}
 
           <div className="bg-white dark:bg-slate-800/50 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-2xl p-8">
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Trade filters</h3>
