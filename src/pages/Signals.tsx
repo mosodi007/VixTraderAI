@@ -276,7 +276,7 @@ function LiveAnalysisConsoleInline() {
 }
 
 export function Signals() {
-  const { user, hasActiveSubscription, profile, tradingMode } = useAuth();
+  const { user, hasActiveSubscription, profile, tradingMode, isTrialing } = useAuth();
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
@@ -518,6 +518,8 @@ export function Signals() {
     ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
     : 0;
 
+  const canAccessSignals = hasActiveSubscription || isTrialing;
+
   return (
     <ProtectedRoute>
       <DashboardLayout currentPage="signals">
@@ -527,7 +529,28 @@ export function Signals() {
             <p className="text-slate-600 dark:text-slate-400">AI-powered Volatility Index trading signals will appear here</p>
           </div>
 
-          {!hasActiveSubscription && (
+          {/* Trial Banner for trialing users */}
+          {isTrialing && !hasActiveSubscription && trialEndsAt && (
+            <div className="bg-gradient-to-br from-emerald-800 to-emerald-900 rounded-2xl p-6 border border-emerald-700">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white mb-1">Your Trial Will Expire On {trialEndsAt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h3>
+                  <p className="text-emerald-200 text-sm">
+                    {trialDaysLeft === 0 ? 'Expires today' : `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} remaining`} - Upgrade now to continue accessing premium signals
+                  </p>
+                </div>
+                <a
+                  href="#pricing"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white hover:bg-slate-100 text-emerald-900 font-semibold rounded-lg transition-all shadow-lg"
+                >
+                  Upgrade Now
+                </a>
+              </div>
+            </div>
+          )}
+
+          {/* Gate for inactive users */}
+          {!canAccessSignals && (
             <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 text-center border border-slate-700">
               <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-500/10 rounded-full mb-4">
                 <Shield className="w-8 h-8 text-emerald-500" />
@@ -560,7 +583,7 @@ export function Signals() {
             </div>
           )}
 
-          {hasActiveSubscription && (
+          {canAccessSignals && (
             <button
               type="button"
               onClick={() => setShowLiveAnalysis((prev) => !prev)}
@@ -571,7 +594,7 @@ export function Signals() {
             </button>
           )}
 
-          {hasActiveSubscription && (
+          {canAccessSignals && (
             <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-lg dark:shadow-none">
               <div className="p-6 border-b border-slate-300 dark:border-slate-700">
                 <div className="flex items-center justify-between">
