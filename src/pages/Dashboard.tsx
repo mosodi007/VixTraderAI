@@ -12,7 +12,7 @@ import { AccountLiveMetrics } from '../components/AccountLiveMetrics';
 import { LiveMT5Positions } from '../components/LiveMT5Positions';
 
 export function Dashboard() {
-  const { user, tradingMode } = useAuth();
+  const { user, tradingMode, hasActiveSubscription, isTrialing, profile } = useAuth();
   const [mt5Account, setMt5Account] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -96,20 +96,27 @@ export function Dashboard() {
             <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-2xl p-8 shadow-xl">
               <div className="max-w-2xl">
                 <h3 className="text-2xl font-bold text-white mb-4">
-                  {tradingMode === 'live' ? 'Connect your Live MT5' : 'Connect your Demo MT5'}
+                  Connect your MT5 Login
                 </h3>
-                <p className="text-emerald-50 mb-6 leading-relaxed">
-                  {tradingMode === 'live'
-                    ? 'To enable Live trading features, create or connect a Deriv real MT5 account and submit it for verification.'
-                    : 'To use Demo mode, create or connect a Deriv demo MT5 account. You can view live signals and practice with virtual funds.'}
+                <p className="text-emerald-100 mb-6">
+                  Connect your {tradingMode === 'live' ? 'Live' : 'Demo'} MT5 account to start receiving AI-powered trading signals and automated EA trading.
                 </p>
+                <div className="bg-white/10 border border-white/20 rounded-lg p-4 mb-6">
+                  <p className="text-white font-medium mb-2">What you'll get:</p>
+                  <ul className="space-y-2 text-emerald-50">
+                    <li>✓ Real-time AI trading signals</li>
+                    <li>✓ Multi-timeframe analysis</li>
+                    <li>✓ Automated signal execution via EA</li>
+                    <li>✓ Performance tracking & analytics</li>
+                  </ul>
+                </div>
                 <div className="space-y-4">
                   <div className="flex flex-wrap gap-3">
                     <a
                       href="#settings"
-                      className="inline-flex items-center gap-2 px-6 py-3 bg-white hover:bg-slate-50 text-emerald-700 font-medium rounded-lg transition-colors shadow-lg"
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-white hover:bg-slate-50 text-emerald-700 font-semibold rounded-lg transition-colors shadow-lg"
                     >
-                      {tradingMode === 'live' ? 'Submit Live MT5 login' : 'Submit Demo MT5 login'}
+                      Connect {tradingMode === 'live' ? 'Live' : 'Demo'} MT5
                     </a>
                     <a
                       href={DERIV_MT5_CREATE_URL}

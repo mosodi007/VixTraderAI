@@ -3,7 +3,7 @@ import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Save, AlertCircle, CheckCircle, BarChart3 } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle, BarChart3, CreditCard, Crown, RefreshCw } from 'lucide-react';
 import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 import { DemoAccountApprovedModal } from '../components/DemoAccountApprovedModal';
 
@@ -109,7 +109,7 @@ function formatMt5SaveError(err: { code?: string; message?: string } | null | un
 }
 
 export function Settings() {
-  const { user, tradingMode } = useAuth();
+  const { user, tradingMode, profile, hasActiveSubscription, isTrialing, refreshProfile } = useAuth();
   const [demoAccount, setDemoAccount] = useState<any>(null);
   const [liveAccount, setLiveAccount] = useState<any>(null);
   const [demoLogin, setDemoLogin] = useState('');
@@ -146,6 +146,7 @@ export function Settings() {
   const [emailSignalsMessage, setEmailSignalsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [showDemoApprovedModal, setShowDemoApprovedModal] = useState(false);
+  const [refreshingSubscription, setRefreshingSubscription] = useState(false);
 
   const dismissDemoApprovedModal = () => {
     setShowDemoApprovedModal(false);
@@ -155,10 +156,42 @@ export function Settings() {
   };
 
   useEffect(() => {
+    if (!user) return;
+
     loadDemoAndLiveAccounts();
     loadMt5Accounts();
     loadMinAiConfidence();
-  }, [user]);
+
+    // Refresh profile when returning from Stripe checkout
+    const checkStripeReturn = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const hasStripeSession = params.has('session_id');
+
+      // Also check localStorage for a flag we set before redirecting to Stripe
+      const stripeCheckoutStarted = localStorage.getItem('stripe_checkout_started');
+
+      if (hasStripeSession || stripeCheckoutStarted === 'true') {
+        // Clear the flag
+        localStorage.removeItem('stripe_checkout_started');
+
+        // Remove session_id from URL if present
+        if (hasStripeSession) {
+          window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+        }
+
+        // Show loading state
+        setRefreshingSubscription(true);
+
+        // Wait a moment for webhook to process, then refresh profile
+        setTimeout(async () => {
+          await refreshProfile();
+          setRefreshingSubscription(false);
+        }, 2000);
+      }
+    };
+
+    checkStripeReturn();
+  }, [user, refreshProfile]);
 
   useEffect(() => {
     if (!user) return;
@@ -660,6 +693,44 @@ export function Settings() {
     }
   };
 
+  const subscriptionStatus = profile?.subscription_status;
+  const trialEndsAt = profile?.trial_ends_at ? new Date(profile.trial_ends_at) : null;
+  const trialDaysLeft = trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
+
+  const handleManageSubscription = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stripe-portal`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            return_url: `${window.location.origin}/#settings`,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const { url } = await response.json();
+        if (url) window.location.href = url;
+      }
+    } catch (error) {
+      console.error('Error opening customer portal:', error);
+    }
+  };
+
+  const handleRefreshSubscription = async () => {
+    setRefreshingSubscription(true);
+    await refreshProfile();
+    setRefreshingSubscription(false);
+  };
+
   return (
     <ProtectedRoute>
       <DashboardLayout currentPage="settings">
@@ -671,6 +742,74 @@ export function Settings() {
                 ? 'Live mode — manage your live MT5 account and preferences'
                 : 'Demo mode — manage your demo MT5 account and preferences'}
             </p>
+          </div>
+
+          {/* Subscription Status */}
+          <div className="bg-gradient-to-br from-emerald-600 to-emerald-500 rounded-2xl p-8 text-white shadow-lg">
+            {refreshingSubscription && (
+              <div className="mb-4 bg-white/20 rounded-lg px-4 py-3 flex items-center gap-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                <p className="text-white font-medium">Updating subscription status...</p>
+              </div>
+            )}
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Crown className="w-6 h-6" />
+                  <h3 className="text-2xl font-bold">Subscription Status</h3>
+                </div>
+                {isTrialing && trialDaysLeft > 0 ? (
+                  <div>
+                    <p className="text-emerald-100 mb-2">Free Trial Active</p>
+                    <p className="text-sm text-emerald-50">
+                      {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} remaining in your trial
+                    </p>
+                  </div>
+                ) : subscriptionStatus === 'active' ? (
+                  <div>
+                    <p className="text-emerald-100 mb-2">Pro Plan Active</p>
+                    <p className="text-sm text-emerald-50">
+                      You have full access to all features
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-red-100 mb-2">No Active Subscription</p>
+                    <p className="text-sm text-red-50">
+                      Subscribe to continue accessing premium features
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleRefreshSubscription}
+                  disabled={refreshingSubscription}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+                  title="Refresh subscription status"
+                >
+                  <RefreshCw className={`w-4 h-4 ${refreshingSubscription ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+                {hasActiveSubscription ? (
+                  <button
+                    onClick={handleManageSubscription}
+                    className="flex items-center gap-2 px-6 py-3 bg-white text-emerald-600 font-semibold rounded-lg hover:bg-emerald-50 transition-colors"
+                  >
+                    <CreditCard className="w-5 h-5" />
+                    Manage Subscription
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => window.location.hash = 'pricing'}
+                    className="flex items-center gap-2 px-6 py-3 bg-white text-emerald-600 font-semibold rounded-lg hover:bg-emerald-50 transition-colors"
+                  >
+                    <Crown className="w-5 h-5" />
+                    Upgrade to Pro
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Demo MT5 — only in Demo mode */}

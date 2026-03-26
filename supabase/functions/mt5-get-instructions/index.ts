@@ -260,12 +260,30 @@ Deno.serve(async (req: Request) => {
     // Per-user minimum confidence threshold (defaults to 50%)
     const { data: profileRow, error: profErr } = await supabase
       .from("profiles")
-      .select("ai_min_confidence_percent")
+      .select("ai_min_confidence_percent, subscription_status, trial_ends_at")
       .eq("id", acct.user_id)
       .maybeSingle();
     if (profErr) {
       console.warn("[mt5-get-instructions] profiles load failed:", profErr.message);
     }
+
+    // Check subscription status - trial must be active or user must have active subscription
+    const subscriptionStatus = (profileRow as any)?.subscription_status;
+    const trialEndsAt = (profileRow as any)?.trial_ends_at;
+    const isTrialing = subscriptionStatus === 'trialing' && trialEndsAt && new Date(trialEndsAt) > new Date();
+    const hasActiveSubscription = subscriptionStatus === 'active' || isTrialing;
+
+    if (!hasActiveSubscription) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Subscription Required: Your free trial has expired. Please subscribe at https://vixai.trade/pricing to continue receiving trade signals.",
+          subscription_expired: true,
+        }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const rawMin = (profileRow as any)?.ai_min_confidence_percent;
     // Clamp to [20, 100] so the EA never uses a threshold below 20.
     const parsed = rawMin == null ? 20 : Number(rawMin);

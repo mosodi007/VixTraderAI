@@ -8,11 +8,13 @@ import { getEdgeFunctionHeaders, supabase } from '../lib/supabase';
 
 export function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn, signUp, signInWithGoogle } = useAuth();
   const { theme } = useTheme();
@@ -41,9 +43,35 @@ export function Login() {
     }
   };
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/#reset-password`,
+      });
+
+      if (error) throw error;
+
+      setSuccess('Password reset email sent! Check your inbox.');
+      setTimeout(() => {
+        setIsForgotPassword(false);
+        setSuccess('');
+      }, 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send password reset email');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setLoading(true);
 
     try {
@@ -106,35 +134,55 @@ export function Login() {
         </div>
 
         <div className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-8 border border-slate-300 dark:border-slate-700">
-          <div className="flex gap-2 mb-6">
-            <button
-              onClick={() => setIsSignUp(false)}
-              className={`flex-1 py-2 rounded-lg font-medium transition-all ${
-                !isSignUp
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-black dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => setIsSignUp(true)}
-              className={`flex-1 py-2 rounded-lg font-medium transition-all ${
-                isSignUp
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-black dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
-              }`}
-            >
-              Sign Up
-            </button>
-          </div>
+          {isForgotPassword ? (
+            <div className="mb-6">
+              <button
+                onClick={() => {
+                  setIsForgotPassword(false);
+                  setError('');
+                  setSuccess('');
+                }}
+                className="text-sm text-emerald-600 dark:text-emerald-400 hover:underline mb-4"
+              >
+                ← Back to Sign In
+              </button>
+              <h2 className="text-2xl font-bold text-black dark:text-white mb-2">Reset Password</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Enter your email and we'll send you a link to reset your password.
+              </p>
+            </div>
+          ) : (
+            <div className="flex gap-2 mb-6">
+              <button
+                onClick={() => setIsSignUp(false)}
+                className={`flex-1 py-2 rounded-lg font-medium transition-all ${
+                  !isSignUp
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-200 dark:bg-slate-700 text-black dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => setIsSignUp(true)}
+                className={`flex-1 py-2 rounded-lg font-medium transition-all ${
+                  isSignUp
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-200 dark:bg-slate-700 text-black dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
+                }`}
+              >
+                Sign Up
+              </button>
+            </div>
+          )}
 
-          <button
-            type="button"
-            onClick={handleGoogle}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white font-medium hover:bg-slate-50 dark:hover:bg-slate-600/80 disabled:opacity-60 disabled:cursor-not-allowed transition-colors shadow-sm"
-          >
+          {!isForgotPassword && (
+            <button
+              type="button"
+              onClick={handleGoogle}
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white font-medium hover:bg-slate-50 dark:hover:bg-slate-600/80 disabled:opacity-60 disabled:cursor-not-allowed transition-colors shadow-sm"
+            >
             <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" aria-hidden>
               <path
                 fill="#4285F4"
@@ -155,8 +203,10 @@ export function Login() {
             </svg>
             Continue with Google
           </button>
+          )}
 
-          <div className="relative my-6">
+          {!isForgotPassword && (
+            <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-slate-200 dark:border-slate-600" />
             </div>
@@ -164,9 +214,10 @@ export function Login() {
               <span className="px-3 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400">or</span>
             </div>
           </div>
+          )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {isSignUp && (
+          <form onSubmit={isForgotPassword ? handleForgotPassword : handleSubmit} className="space-y-4">
+            {isSignUp && !isForgotPassword && (
               <div>
                 <label className="block text-sm font-medium text-black dark:text-slate-300 mb-2">
                   Full Name
@@ -195,34 +246,42 @@ export function Login() {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-black dark:text-slate-300 mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  className="w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-black dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent pr-12"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
+            {!isForgotPassword && (
+              <div>
+                <label className="block text-sm font-medium text-black dark:text-slate-300 mb-2">
+                  Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    className="w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-black dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent pr-12"
+                    placeholder="••••••••"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {error && (
               <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3">
                 <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              </div>
+            )}
+
+            {success && (
+              <div className="bg-emerald-500/10 border border-emerald-500/50 rounded-lg p-3">
+                <p className="text-sm text-emerald-600 dark:text-emerald-400">{success}</p>
               </div>
             )}
 
@@ -231,37 +290,61 @@ export function Login() {
               disabled={loading}
               className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
             >
-              {loading ? 'Please wait...' : isSignUp ? 'Sign up' : 'Sign In'}
+              {loading
+                ? 'Please wait...'
+                : isForgotPassword
+                ? 'Send Reset Link'
+                : isSignUp
+                ? 'Sign up'
+                : 'Sign In'}
             </button>
 
-            {!isSignUp ? (
-              <p className="text-center text-xs text-slate-600 dark:text-slate-400 mt-2">
-                By signing in, you agree to our{' '}
-                <a href="#terms" className="underline">
-                  Terms
-                </a>{' '}
-                and{' '}
-                <a href="#privacy" className="underline">
-                  Privacy Policy
-                </a>
-                .
-              </p>
-            ) : (
-              <p className="text-center text-xs text-slate-600 dark:text-slate-400 mt-2">
-                By signing up, you agree to our{' '}
-                <a href="#terms" className="underline">
-                  Terms
-                </a>{' '}
-                and{' '}
-                <a href="#privacy" className="underline">
-                  Privacy Policy
-                </a>
-                .
-              </p>
+            {!isSignUp && !isForgotPassword && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsForgotPassword(true);
+                  setError('');
+                  setSuccess('');
+                }}
+                className="w-full text-sm text-emerald-600 dark:text-emerald-400 hover:underline"
+              >
+                Forgot password?
+              </button>
+            )}
+
+            {!isForgotPassword && (
+              <>
+                {!isSignUp ? (
+                  <p className="text-center text-xs text-slate-600 dark:text-slate-400 mt-2">
+                    By signing in, you agree to our{' '}
+                    <a href="#terms" className="underline">
+                      Terms
+                    </a>{' '}
+                    and{' '}
+                    <a href="#privacy" className="underline">
+                      Privacy Policy
+                    </a>
+                    .
+                  </p>
+                ) : (
+                  <p className="text-center text-xs text-slate-600 dark:text-slate-400 mt-2">
+                    By signing up, you agree to our{' '}
+                    <a href="#terms" className="underline">
+                      Terms
+                    </a>{' '}
+                    and{' '}
+                    <a href="#privacy" className="underline">
+                      Privacy Policy
+                    </a>
+                    .
+                  </p>
+                )}
+              </>
             )}
           </form>
 
-          {isSignUp && (
+          {isSignUp && !isForgotPassword && (
             <div className="mt-6 p-4 bg-emerald-600/10 border border-emerald-600/30 rounded-lg">
               <p className="text-sm text-emerald-600 dark:text-emerald-400">
                 After signing up, connect or create your Deriv MT5 account on{' '}

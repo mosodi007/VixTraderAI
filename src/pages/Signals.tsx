@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity } from 'lucide-react';
 import { SignalModal } from '../components/SignalModal';
+import { TrialExpiredBanner } from '../components/TrialExpiredBanner';
 import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 
 interface Signal {
@@ -276,7 +277,7 @@ function LiveAnalysisConsoleInline() {
 }
 
 export function Signals() {
-  const { user } = useAuth();
+  const { user, hasActiveSubscription, profile, tradingMode, isTrialing } = useAuth();
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
@@ -470,14 +471,9 @@ export function Signals() {
   }, [user, loadSignals, monitorSignalPrices]);
 
   useEffect(() => {
-    if (mt5Connected) {
-      void loadSignals();
-      void monitorSignalPrices();
-    } else {
-      setSignals([]);
-      setLoading(false);
-    }
-  }, [mt5Connected, loadSignals, monitorSignalPrices]);
+    void loadSignals();
+    void monitorSignalPrices();
+  }, [loadSignals, monitorSignalPrices]);
 
   const groupSignalsByDate = (signals: Signal[]): GroupedSignals => {
     const grouped: GroupedSignals = {};
@@ -518,76 +514,85 @@ export function Signals() {
   const activeSignalsList = signals.filter((s) => s.is_active !== false);
   const groupedSignals = groupSignalsByDate(activeSignalsList);
 
+  const trialEndsAt = profile?.trial_ends_at ? new Date(profile.trial_ends_at) : null;
+  const trialDaysLeft = trialEndsAt
+    ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+    : 0;
+
+  const canAccessSignals = hasActiveSubscription || isTrialing;
+
   return (
     <ProtectedRoute>
       <DashboardLayout currentPage="signals">
+        {/* Trial Expired Banner */}
+        {!canAccessSignals && profile?.subscription_status !== 'inactive' && (
+          <TrialExpiredBanner />
+        )}
+
         <div className="max-w-7xl mx-auto space-y-6">
           <div>
             <h2 className="text-3xl font-bold text-black dark:text-white mb-2">Trading Signals</h2>
             <p className="text-slate-600 dark:text-slate-400">AI-powered Volatility Index trading signals will appear here</p>
           </div>
 
-          {isVerifiedMember === false && (
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-yellow-700 dark:text-yellow-300 mb-2">
-                {verificationStatus === 'pending' ? 'MT5 verification in progress' : verificationStatus === 'rejected' ? 'MT5 verification failed' : 'Verify your MT5 to view Live Signals'}
+          {/* Trial Banner for trialing users */}
+          {isTrialing && !hasActiveSubscription && trialEndsAt && (
+            <div className="bg-gradient-to-br from-emerald-800 to-emerald-900 rounded-2xl p-6 border border-emerald-700">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white mb-1">Your Trial Will Expire On {trialEndsAt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</h3>
+                  <p className="text-emerald-200 text-sm">
+                    {trialDaysLeft === 0 ? 'Expires today' : `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} remaining`} - Upgrade now to continue accessing premium signals
+                  </p>
+                </div>
+                <a
+                  href="#pricing"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-white hover:bg-slate-100 text-emerald-900 font-semibold rounded-lg transition-all shadow-lg"
+                >
+                  Upgrade Now
+                </a>
+              </div>
+            </div>
+          )}
+
+          {/* Gate for inactive users */}
+          {!canAccessSignals && (
+            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 text-center border border-slate-700">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-500/10 rounded-full mb-4">
+                <Shield className="w-8 h-8 text-emerald-500" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">
+                {profile?.subscription_status === 'inactive' ? 'Connect your MT5 Login' : 'Trial Expired'}
               </h3>
-              <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">
-                {verificationStatus === 'pending'
-                  ? 'We are reviewing your account, we will notify you via email when we are done.'
-                  : verificationStatus === 'rejected'
-                    ? 'Your MT5 account was rejected. Please create a new MT5 account in Deriv and submit the new login in Settings.'
-                    : 'Live Signals unlock after your live MT5 account is verified.'}
+              <p className="text-slate-300 mb-6">
+                {profile?.subscription_status === 'inactive'
+                  ? `Connect your ${tradingMode === 'live' ? 'Live' : 'Demo'} MT5 account to activate your 3-day free trial and start receiving signals.`
+                  : 'Your free trial has ended. Subscribe to continue receiving trading signals.'}
               </p>
-              <div className="flex flex-wrap gap-3">
-                <a
-                  href="#settings"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
-                >
-                  Go to Settings
-                </a>
-                <a
-                  href={DERIV_MT5_CREATE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-medium rounded-lg transition-colors"
-                >
-                  Create MT5 on Deriv
-                </a>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                {profile?.subscription_status === 'inactive' ? (
+                  <a
+                    href="#settings"
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-semibold rounded-lg transition-all shadow-lg"
+                  >
+                    Connect MT5 & Start Trial
+                  </a>
+                ) : (
+                  <a
+                    href="#pricing"
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-semibold rounded-lg transition-all shadow-lg"
+                  >
+                    View Pricing Plans
+                  </a>
+                )}
               </div>
             </div>
           )}
 
-          {isVerifiedMember === true && mt5Connected === false && (
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-yellow-700 dark:text-yellow-300 mb-2">Connect MT5 to view Live Signals</h3>
-              <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">
-                Live Signals are only available when your MT5 Expert Advisor is connected and sending heartbeats.
-              </p>
-              <div className="flex flex-wrap gap-3">
-                <a
-                  href="#settings"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
-                >
-                  Go to Settings
-                </a>
-                <a
-                  href={DERIV_MT5_CREATE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-medium rounded-lg transition-colors"
-                >
-                  Create MT5 on Deriv
-                </a>
-              </div>
-            </div>
-          )}
-
-          {isVerifiedMember === true && (
+          {canAccessSignals && (
             <button
               type="button"
               onClick={() => setShowLiveAnalysis((prev) => !prev)}
-              disabled={mt5Connected === false}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
             >
               <Activity className="w-4 h-4" />
@@ -595,7 +600,7 @@ export function Signals() {
             </button>
           )}
 
-          {isVerifiedMember === true && (
+          {canAccessSignals && (
             <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-lg dark:shadow-none">
               <div className="p-6 border-b border-slate-300 dark:border-slate-700">
                 <div className="flex items-center justify-between">
