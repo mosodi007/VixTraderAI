@@ -1,5 +1,5 @@
+//Advance-signal-detector old
 import { TechnicalAnalyzer, TickData, Candle, TechnicalIndicators } from './technical-indicators.ts';
-import { getSlTpDistanceInPrice } from './symbol-sl-tp.ts';
 
 export interface SignalTrigger {
   indicatorName: string;
@@ -25,22 +25,14 @@ export interface SignalDetectionResult {
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
-  tp1?: number;
-  tp2?: number;
-  tp3?: number;
   reasoning: string;
-  /** For ICT refinement: support/resistance from structure (when direction is set) */
-  supportLevels?: number[];
-  resistanceLevels?: number[];
-  /** ATR for ICT refiner (when direction is set) */
-  atr?: number;
 }
 
 export class AdvancedSignalDetector {
   private analyzer: TechnicalAnalyzer;
-  private minTriggers: number = 3;
-  private minConfidence: number = 55;
-  private minRiskReward: number = 1.2;
+  private minTriggers: number = 4;
+  private minConfidence: number = 20;
+  private minRiskReward: number = 1.5;
 
   constructor(ticks: TickData[]) {
     this.analyzer = new TechnicalAnalyzer(ticks);
@@ -231,10 +223,27 @@ export class AdvancedSignalDetector {
       });
     }
 
-    // EMA Crossover (relaxed threshold 0.25% so trend confirmation fires more often)
+    // Bollinger Bands
+    if (currentPrice < indicators.bollingerBands.lower) {
+      triggers.push({
+        indicatorName: 'Bollinger Bands',
+        indicatorValue: currentPrice,
+        triggerCondition: 'Price below lower band (Oversold - Bullish signal)',
+        timeframe
+      });
+    } else if (currentPrice > indicators.bollingerBands.upper) {
+      triggers.push({
+        indicatorName: 'Bollinger Bands',
+        indicatorValue: currentPrice,
+        triggerCondition: 'Price above upper band (Overbought - Bearish signal)',
+        timeframe
+      });
+    }
+
+    // EMA Crossover
     if (indicators.ema12 > indicators.ema26) {
       const crossoverStrength = ((indicators.ema12 - indicators.ema26) / indicators.ema26) * 100;
-      if (crossoverStrength > 0.25) {
+      if (crossoverStrength > 0.5) {
         triggers.push({
           indicatorName: 'EMA Crossover',
           indicatorValue: crossoverStrength,
@@ -244,7 +253,7 @@ export class AdvancedSignalDetector {
       }
     } else if (indicators.ema12 < indicators.ema26) {
       const crossoverStrength = ((indicators.ema26 - indicators.ema12) / indicators.ema26) * 100;
-      if (crossoverStrength > 0.25) {
+      if (crossoverStrength > 0.5) {
         triggers.push({
           indicatorName: 'EMA Crossover',
           indicatorValue: crossoverStrength,
@@ -279,74 +288,68 @@ export class AdvancedSignalDetector {
     entryPrice: number,
     atr: number,
     supportLevels: number[],
-    resistanceLevels: number[],
-    symbol: string
-  ): { stopLoss: number; takeProfit: number; tp1: number; tp2: number; tp3: number; rr: number } {
-    const { slDistance, tp1Distance, tp2Distance, tp3Distance } = getSlTpDistanceInPrice(symbol, entryPrice);
-    const riskAmount = slDistance; // strict 30-pip SL (no ATR blend)
+    resistanceLevels: number[]
+  ): { stopLoss: number; takeProfit: number; rr: number } {
+    const slMultiplier = 1;
+    let riskAmount = atr * slMultiplier;
+
+    const minRiskPercentage = 0.015;
+    const minRiskAmount = entryPrice * minRiskPercentage;
+    if (riskAmount < minRiskAmount) {
+      riskAmount = minRiskAmount;
+    }
+
+    const rewardMultiplier = 3;
 
     let stopLoss: number;
-    let tp1: number;
-    let tp2: number;
-    let tp3: number;
+    let takeProfit: number;
 
     if (direction === 'BUY') {
       stopLoss = entryPrice - riskAmount;
-      tp1 = entryPrice + tp1Distance;
-      tp2 = entryPrice + tp2Distance;
-      tp3 = entryPrice + tp3Distance;
+      takeProfit = entryPrice + (riskAmount * rewardMultiplier);
 
       if (supportLevels.length > 0) {
         const nearestSupport = supportLevels
-          .filter(s => s < entryPrice && s > stopLoss)
+          .filter(s => s < entryPrice)
           .sort((a, b) => b - a)[0];
         if (nearestSupport) {
-          const candidateSL = nearestSupport - (atr * 0.5);
-          if (entryPrice - candidateSL >= riskAmount) {
-            stopLoss = candidateSL;
+          const supportDistance = entryPrice - nearestSupport;
+          if (supportDistance > riskAmount * 0.3 && supportDistance < riskAmount * 2) {
+            stopLoss = nearestSupport - (atr * 0.5);
+            const newRisk = entryPrice - stopLoss;
+            takeProfit = entryPrice + (newRisk * rewardMultiplier);
           }
         }
-      }
-      // Enforce minimum SL distance: never closer than riskAmount
-      if (entryPrice - stopLoss < riskAmount) {
-        stopLoss = entryPrice - riskAmount;
       }
     } else {
       stopLoss = entryPrice + riskAmount;
-      tp1 = entryPrice - tp1Distance;
-      tp2 = entryPrice - tp2Distance;
-      tp3 = entryPrice - tp3Distance;
+      takeProfit = entryPrice - (riskAmount * rewardMultiplier);
 
       if (resistanceLevels.length > 0) {
         const nearestResistance = resistanceLevels
-          .filter(r => r > entryPrice && r < stopLoss)
+          .filter(r => r > entryPrice)
           .sort((a, b) => a - b)[0];
         if (nearestResistance) {
-          const candidateSL = nearestResistance + (atr * 0.5);
-          if (candidateSL - entryPrice >= riskAmount) {
-            stopLoss = candidateSL;
+          const resistanceDistance = nearestResistance - entryPrice;
+          if (resistanceDistance > riskAmount * 0.3 && resistanceDistance < riskAmount * 2) {
+            stopLoss = nearestResistance + (atr * 0.5);
+            const newRisk = stopLoss - entryPrice;
+            takeProfit = entryPrice - (newRisk * rewardMultiplier);
           }
         }
       }
-      // Enforce minimum SL distance: never closer than riskAmount
-      if (stopLoss - entryPrice < riskAmount) {
-        stopLoss = entryPrice + riskAmount;
-      }
     }
 
-    const riskReward = Math.abs(tp1 - entryPrice) / Math.abs(stopLoss - entryPrice);
+    const riskReward = Math.abs(takeProfit - entryPrice) / Math.abs(stopLoss - entryPrice);
 
     return {
       stopLoss: parseFloat(stopLoss.toFixed(2)),
-      takeProfit: parseFloat(tp3.toFixed(2)),
-      tp1: parseFloat(tp1.toFixed(2)),
-      tp2: parseFloat(tp2.toFixed(2)),
-      tp3: parseFloat(tp3.toFixed(2)),
+      takeProfit: parseFloat(takeProfit.toFixed(2)),
       rr: parseFloat(riskReward.toFixed(2))
     };
   }
 
-  detectSignal(symbol: string, timeframe: string = 'M1'): SignalDetectionResult {
+  detectSignal(symbol: string, timeframe: string = 'M15'): SignalDetectionResult {
     try {
       const indicators = this.analyzer.calculateIndicators();
       const ticks = (this.analyzer as any).ticks as TickData[];
@@ -401,7 +404,7 @@ export class AdvancedSignalDetector {
           entryPrice: currentPrice,
           stopLoss: 0,
           takeProfit: 0,
-          reasoning: 'No trading signal detected yet.'
+          reasoning: 'Insufficient signal strength. Need at least 3 confirming indicators with 75% confidence.'
         };
       }
 
@@ -411,13 +414,12 @@ export class AdvancedSignalDetector {
         currentPrice,
         indicators.atr,
         analysis.supportLevels,
-        analysis.resistanceLevels,
-        symbol
+        analysis.resistanceLevels
       );
 
       // Calculate confidence
       const maxSignals = Math.max(bullishSignals, bearishSignals);
-      const totalPossibleSignals = 5; // RSI, MACD, EMA, Trend, Patterns
+      const totalPossibleSignals = 6; // RSI, MACD, BB, EMA, Trend, Patterns
       const confidence = Math.min(Math.round((maxSignals / totalPossibleSignals) * 100), 99);
 
       // Check quality thresholds
@@ -439,13 +441,7 @@ export class AdvancedSignalDetector {
         entryPrice: currentPrice,
         stopLoss: slTp.stopLoss,
         takeProfit: slTp.takeProfit,
-        tp1: slTp.tp1,
-        tp2: slTp.tp2,
-        tp3: slTp.tp3,
-        reasoning,
-        supportLevels: analysis.supportLevels,
-        resistanceLevels: analysis.resistanceLevels,
-        atr: indicators.atr,
+        reasoning
       };
     } catch (error) {
       return {
@@ -473,7 +469,7 @@ export class AdvancedSignalDetector {
   ): string {
     const parts: string[] = [];
 
-    parts.push(`${direction} signal detected with ${confidence}% confidence`);
+    parts.push(`${direction} signal detected with ${confidence}% confidence and ${rr}:1 risk-reward ratio.`);
 
     if (triggers.length > 0) {
       parts.push(`\n\nTechnical Triggers (${triggers.length}):`);

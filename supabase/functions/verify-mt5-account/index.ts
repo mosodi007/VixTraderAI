@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createDerivAPI } from "../_shared/deriv-api.ts";
+import { sendMt5VerificationEmail } from "../_shared/resend.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -76,12 +77,54 @@ Deno.serve(async (req: Request) => {
         console.error("Error updating account status:", updateError);
       }
 
+      // Email user about rejection, then remove the rejected MT5 login so they can add a new one.
+      let rejectionEmail: { id?: string; error?: string } | null = null;
+      try {
+        const { data: profile } = await supabase.from("profiles").select("email").eq("id", user.id).maybeSingle();
+        const to = (profile as any)?.email || user.email || "";
+        if (to) {
+          rejectionEmail = await sendMt5VerificationEmail({
+            to,
+            status: "rejected",
+            mt5_login: String(mt5_login),
+            server: String(server),
+            rejected_reason: rejectionReason,
+          });
+        }
+      } catch (e) {
+        console.warn("Failed to send rejection email:", String((e as any)?.message || e));
+      }
+
+      try {
+        const { error: delErr } = await supabase
+          .from("mt5_accounts")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("mt5_login", mt5_login);
+        if (delErr) console.warn("Failed to delete rejected MT5 row:", delErr.message);
+      } catch (e) {
+        console.warn("Failed to delete rejected MT5 row:", String((e as any)?.message || e));
+      }
+
+      // Best-effort cleanup of per-login settings/connection rows for this MT5 login
+      try {
+        await supabase.from("mt5_symbol_settings").delete().eq("user_id", user.id).eq("mt5_login", mt5_login);
+      } catch {
+        // ignore
+      }
+      try {
+        await supabase.from("ea_connections").delete().eq("user_id", user.id).eq("mt5_login", mt5_login);
+      } catch {
+        // ignore
+      }
+
       return new Response(
         JSON.stringify({
           success: false,
           verified: false,
           message: "Account verification failed",
           errors: validationResult.errors,
+          email: rejectionEmail,
           validation_details: {
             server_valid: validationResult.serverValid,
             account_type: validationResult.accountType,
@@ -100,9 +143,11 @@ Deno.serve(async (req: Request) => {
 
     const accountInfo = validationResult.accountInfo!;
 
+    const isDemo = validationResult.accountType === "demo";
     const updateData: any = {
       verified: true,
-      verification_status: "verified",
+      // Demo accounts: store `approved`; live accounts: `verified` (both are treated as OK in edge functions).
+      verification_status: isDemo ? "approved" : "verified",
       verified_at: new Date().toISOString(),
       balance: accountInfo.balance,
       equity: accountInfo.equity,
@@ -131,11 +176,29 @@ Deno.serve(async (req: Request) => {
 
     console.log(`MT5 account ${mt5_login} verified and approved successfully`);
 
+    // Email user about approval.
+    let approvalEmail: { id?: string; error?: string } | null = null;
+    try {
+      const { data: profile } = await supabase.from("profiles").select("email").eq("id", user.id).maybeSingle();
+      const to = (profile as any)?.email || user.email || "";
+      if (to) {
+        approvalEmail = await sendMt5VerificationEmail({
+          to,
+          status: "approved",
+          mt5_login: String(mt5_login),
+          server: String(server),
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to send approval email:", String((e as any)?.message || e));
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         verified: true,
         message: "Account verified and approved successfully",
+        email: approvalEmail,
         account_info: {
           login: accountInfo.login,
           server: accountInfo.server,

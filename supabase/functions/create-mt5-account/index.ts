@@ -31,7 +31,7 @@ Deno.serve(async (req: Request) => {
       throw new Error("Deriv API token not configured");
     }
 
-    const ws = new WebSocket("wss://ws.derivws.com/websockets/v3?app_id=1089");
+    const ws = new WebSocket("wss://ws.derivws.com/websockets/v3?app_id=89937");
 
     const accountCreationPromise = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {

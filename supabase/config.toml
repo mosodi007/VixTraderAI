@@ -1,0 +1,27 @@
+# Supabase project config (minimal overrides).
+# MT5 EA endpoints use a custom Bearer token (EA_API_TOKEN), not Supabase JWT.
+# Disable gateway JWT check so the function can validate the EA token itself.
+[functions.mt5-get-instructions]
+verify_jwt = false
+
+[functions.mt5-report-trade]
+verify_jwt = false
+
+[functions.mt5-report-account]
+verify_jwt = false
+
+[functions.mt5-report-positions]
+verify_jwt = false
+
+[functions.update-signal-filters]
+verify_jwt = false
+
+[functions.auto-generate-signals]
+verify_jwt = false
+
+# Public verification flow: no Supabase user JWT when email confirmation blocks session.
+[functions.send-email-verification]
+verify_jwt = false
+
+[functions.verify-email-signup]
+verify_jwt = false

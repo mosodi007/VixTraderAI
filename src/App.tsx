@@ -2,24 +2,65 @@ import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { Login } from './pages/Login';
+import { Landing } from './pages/Landing';
 import { Dashboard } from './pages/Dashboard';
 import { Signals } from './pages/Signals';
 import { PastSignals } from './pages/PastSignals';
 import { Performance } from './pages/Performance';
 import { Settings } from './pages/Settings';
-import { CreateMT5 } from './pages/CreateMT5';
 import { Debug } from './pages/Debug';
 import { LiveAnalysis } from './pages/LiveAnalysis';
+import { TermsOfService } from './pages/TermsOfService';
+import { PrivacyPolicy } from './pages/PrivacyPolicy';
+import { VerifyEmail } from './pages/VerifyEmail';
+import { Pricing } from './pages/Pricing';
+import { ResetPassword } from './pages/ResetPassword';
+import { TawkWidget } from './components/TawkWidget';
 
 function AppRoutes() {
-  const { user, loading } = useAuth();
-  const [currentPage, setCurrentPage] = useState<'home' | 'signals' | 'past-signals' | 'performance' | 'settings' | 'create-mt5' | 'debug' | 'live-analysis'>('home');
+  const { user, loading, profile } = useAuth();
+  const isEmailConfirmed = !!profile?.email_verified_at;
+  const [currentPage, setCurrentPage] = useState<
+    | 'home'
+    | 'signals'
+    | 'past-signals'
+    | 'performance'
+    | 'settings'
+    | 'debug'
+    | 'live-analysis'
+    | 'terms'
+    | 'privacy'
+    | 'verify-email'
+    | 'pricing'
+    | 'reset-password'
+  >('home');
+  const [authHash, setAuthHash] = useState(() => window.location.hash.slice(1));
+  const authHashBase = authHash.split('?')[0];
 
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.slice(1);
-      if (hash === 'signals' || hash === 'past-signals' || hash === 'performance' || hash === 'settings' || hash === 'home' || hash === 'create-mt5' || hash === 'debug' || hash === 'live-analysis') {
-        setCurrentPage(hash);
+      let hash = window.location.hash.slice(1);
+      const base = hash.split('?')[0];
+      setAuthHash(hash);
+      if (hash === 'create-mt5') {
+        window.location.hash = 'settings';
+        hash = 'settings';
+      }
+      if (
+        base === 'signals' ||
+        base === 'past-signals' ||
+        base === 'performance' ||
+        base === 'settings' ||
+        base === 'home' ||
+        base === 'debug' ||
+        base === 'live-analysis' ||
+        base === 'terms' ||
+        base === 'privacy' ||
+        base === 'verify-email' ||
+        base === 'pricing' ||
+        base === 'reset-password'
+      ) {
+        setCurrentPage(base as any);
       }
     };
 
@@ -39,11 +80,42 @@ function AppRoutes() {
     );
   }
 
+  // Hard gate: users can't access the dashboard until their email is confirmed.
+  // We do this at the app/router level so the VerifyEmail screen always appears.
+  if (user && !isEmailConfirmed) {
+    // Allow navigation away from the verification screen (e.g. "Back to login" or "#home")
+    // while still preventing access to any authenticated dashboard views.
+    if (authHashBase === 'login' || authHashBase === 'signup') return <Login />;
+    if (authHashBase === 'terms') return <TermsOfService />;
+    if (authHashBase === 'privacy') return <PrivacyPolicy />;
+    if (authHashBase === 'reset-password') return <ResetPassword />;
+    if (authHashBase === 'home' || authHashBase === '') return <Landing />;
+
+    if (authHashBase !== 'verify-email') window.location.hash = 'verify-email';
+    return <VerifyEmail />;
+  }
+
   if (!user) {
-    return <Login />;
+    if (authHashBase === 'login' || authHashBase === 'signup') return <Login />;
+    if (authHashBase === 'terms') return <TermsOfService />;
+    if (authHashBase === 'privacy') return <PrivacyPolicy />;
+    if (authHashBase === 'verify-email') return <VerifyEmail />;
+    if (authHashBase === 'pricing') return <Pricing />;
+    if (authHashBase === 'reset-password') return <ResetPassword />;
+    return <Landing />;
   }
 
   switch (currentPage) {
+    case 'terms':
+      return <TermsOfService />;
+    case 'privacy':
+      return <PrivacyPolicy />;
+    case 'verify-email':
+      return <VerifyEmail />;
+    case 'pricing':
+      return <Pricing />;
+    case 'reset-password':
+      return <ResetPassword />;
     case 'signals':
       return <Signals />;
     case 'past-signals':
@@ -52,8 +124,6 @@ function AppRoutes() {
       return <Performance />;
     case 'settings':
       return <Settings />;
-    case 'create-mt5':
-      return <CreateMT5 />;
     case 'debug':
       return <Debug />;
     case 'live-analysis':
@@ -67,6 +137,7 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <TawkWidget />
         <AppRoutes />
       </AuthProvider>
     </ThemeProvider>

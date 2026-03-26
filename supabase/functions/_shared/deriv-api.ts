@@ -74,13 +74,20 @@ export interface CandleData {
   epoch: number;
 }
 
+export interface MultiTimeframeMarketData {
+  m1: CandleData[];
+  m5: CandleData[];
+  m15: CandleData[];
+  ticks: TickData[];
+}
+
 export class DerivAPI {
   private config: DerivAPIConfig;
   private wsUrl: string;
 
   constructor(config: DerivAPIConfig) {
     this.config = config;
-    const appId = config.appId || "1089";
+    const appId = config.appId || "89937";
     this.wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${appId}`;
   }
 
@@ -438,21 +445,71 @@ export class DerivAPI {
         false
       );
 
-      if (!result || !result.candles) {
+      // Deriv can return candles in different shapes depending on msg parsing path:
+      // - Array shape: response.candles (already extracted by executeRequest)
+      // - Object shape: { candles: [...] }
+      // - History shape: { history: { candles: [...] } } in some API wrappers
+      const rawCandles: any[] | null =
+        Array.isArray(result)
+          ? result
+          : Array.isArray(result?.candles)
+            ? result.candles
+            : Array.isArray(result?.history?.candles)
+              ? result.history.candles
+              : null;
+
+      if (!rawCandles || rawCandles.length === 0) {
+        console.warn(`[DerivAPI] Empty candle history for ${symbol} @ ${granularity}s (count=${count})`);
         return [];
       }
 
-      return result.candles.map((candle: any) => ({
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        epoch: candle.epoch,
-      }));
+      return rawCandles
+        .map((candle: any) => ({
+          open: Number(candle?.open),
+          high: Number(candle?.high),
+          low: Number(candle?.low),
+          close: Number(candle?.close),
+          epoch: Number(candle?.epoch),
+        }))
+        .filter(
+          (c: CandleData) =>
+            Number.isFinite(c.open) &&
+            Number.isFinite(c.high) &&
+            Number.isFinite(c.low) &&
+            Number.isFinite(c.close) &&
+            Number.isFinite(c.epoch),
+        );
     } catch (error) {
       console.error("Error fetching candle history:", error);
       return [];
     }
+  }
+
+  /**
+   * Fetch synchronized multi-timeframe market data for AMD strategy.
+   */
+  async getMultiTimeframeMarketData(
+    symbol: string,
+    options?: {
+      m1Count?: number;
+      m5Count?: number;
+      m15Count?: number;
+      tickCount?: number;
+    },
+  ): Promise<MultiTimeframeMarketData> {
+    const m1Count = Math.max(60, options?.m1Count ?? 240);
+    const m5Count = Math.max(40, options?.m5Count ?? 160);
+    const m15Count = Math.max(24, options?.m15Count ?? 96);
+    const tickCount = Math.max(200, options?.tickCount ?? 1000);
+
+    const [m1, m5, m15, ticks] = await Promise.all([
+      this.getCandleHistory(symbol, 60, m1Count),
+      this.getCandleHistory(symbol, 300, m5Count),
+      this.getCandleHistory(symbol, 900, m15Count),
+      this.getTickHistory(symbol, tickCount),
+    ]);
+
+    return { m1, m5, m15, ticks };
   }
 
   /**
@@ -481,11 +538,14 @@ export class DerivAPI {
     // Map Deriv synthetic indices to MT5 format
     const symbolMap: { [key: string]: string } = {
       'R_10': 'Volatility 10 Index',
+      'R_25': 'Volatility 25 Index',
       'R_50': 'Volatility 50 Index',
+      'R_75': 'Volatility 75 Index',
       'R_100': 'Volatility 100 Index',
       '1HZ10V': 'Volatility 10 (1s) Index',
       '1HZ30V': 'Volatility 30 (1s) Index',
       '1HZ50V': 'Volatility 50 (1s) Index',
+      '1HZ75V': 'Volatility 75 (1s) Index',
       '1HZ90V': 'Volatility 90 (1s) Index',
       '1HZ100V': 'Volatility 100 (1s) Index',
       'stpRNG': 'Step Index',

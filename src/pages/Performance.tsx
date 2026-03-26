@@ -26,7 +26,7 @@ interface Trade {
 }
 
 export function Performance() {
-  const { user } = useAuth();
+  const { user, tradingMode } = useAuth();
   const [stats, setStats] = useState<TradeStats>({
     totalTrades: 0,
     winningTrades: 0,
@@ -40,15 +40,33 @@ export function Performance() {
 
   useEffect(() => {
     loadPerformanceData();
-  }, [user, timeframe]);
+  }, [user, timeframe, tradingMode]);
 
   const loadPerformanceData = async () => {
     if (!user) return;
+
+    const { data: accounts } = await supabase
+      .from('mt5_accounts')
+      .select('mt5_login,account_type')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true });
+    const logins = ((accounts as any[]) || [])
+      .filter((r) => (tradingMode === 'demo' ? r?.account_type === 'demo' : r?.account_type === 'real' || r?.account_type === 'live'))
+      .map((r) => String(r.mt5_login || '').trim())
+      .filter(Boolean);
+
+    if (logins.length === 0) {
+      setTrades([]);
+      setStats({ totalTrades: 0, winningTrades: 0, losingTrades: 0, totalProfit: 0, winRate: 0 });
+      setLoading(false);
+      return;
+    }
 
     let query = supabase
       .from('trades')
       .select('*')
       .eq('user_id', user.id)
+      .in('mt5_login', logins)
       .order('opened_at', { ascending: false });
 
     if (timeframe !== 'all') {

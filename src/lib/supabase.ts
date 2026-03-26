@@ -7,7 +7,27 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    flowType: 'pkce',
+    detectSessionInUrl: true,
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+});
+
+/**
+ * Headers for calling Edge Functions via fetch().
+ * Supabase requires `apikey` + `Authorization: Bearer <anon or user JWT>`.
+ * Use the anon key when the user has no session (e.g. right after sign-up if Auth withholds session until confirm).
+ */
+export function getEdgeFunctionHeaders(accessToken?: string | null) {
+  return {
+    'Content-Type': 'application/json',
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${accessToken || supabaseAnonKey}`,
+  } as const;
+}
 
 export interface Database {
   public: {
@@ -17,6 +37,7 @@ export interface Database {
           id: string;
           email: string;
           full_name: string | null;
+          trading_mode?: 'demo' | 'live';
           created_at: string;
           updated_at: string;
         };
@@ -24,6 +45,7 @@ export interface Database {
           id: string;
           email: string;
           full_name?: string | null;
+          trading_mode?: 'demo' | 'live';
           created_at?: string;
           updated_at?: string;
         };
@@ -31,6 +53,7 @@ export interface Database {
           id?: string;
           email?: string;
           full_name?: string | null;
+          trading_mode?: 'demo' | 'live';
           created_at?: string;
           updated_at?: string;
         };
@@ -47,6 +70,15 @@ export interface Database {
           rejected_reason: string | null;
           created_at: string;
           verified_at: string | null;
+          balance?: number;
+          equity?: number;
+          margin?: number;
+          free_margin?: number;
+          margin_level?: number;
+          currency?: string;
+          leverage?: number;
+          last_sync?: string | null;
+          password_hash?: string | null;
         };
         Insert: {
           id?: string;
@@ -71,6 +103,65 @@ export interface Database {
           rejected_reason?: string | null;
           created_at?: string;
           verified_at?: string | null;
+          balance?: number;
+          equity?: number;
+          margin?: number;
+          free_margin?: number;
+          margin_level?: number;
+          currency?: string;
+          leverage?: number;
+          last_sync?: string | null;
+          password_hash?: string | null;
+        };
+      };
+      mt5_positions: {
+        Row: {
+          id: string;
+          user_id: string;
+          mt5_login: string;
+          ticket: string;
+          symbol: string;
+          direction: string;
+          volume: number;
+          price_open: number;
+          price_current: number;
+          stop_loss: number | null;
+          take_profit: number | null;
+          profit: number;
+          opened_at: string;
+          last_updated: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          mt5_login: string;
+          ticket: string;
+          symbol: string;
+          direction: string;
+          volume: number;
+          price_open: number;
+          price_current: number;
+          stop_loss?: number | null;
+          take_profit?: number | null;
+          profit?: number;
+          opened_at: string;
+          last_updated?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          mt5_login?: string;
+          ticket?: string;
+          symbol?: string;
+          direction?: string;
+          volume?: number;
+          price_open?: number;
+          price_current?: number;
+          stop_loss?: number | null;
+          take_profit?: number | null;
+          profit?: number;
+          opened_at?: string;
+          last_updated?: string;
         };
       };
       signals: {

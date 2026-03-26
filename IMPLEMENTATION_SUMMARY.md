@@ -11,10 +11,9 @@ A fully automated, real-time trading signal generation system that continuously 
 - No manual generation required
 - Continuous 15-minute scan cycle for stability
 
-### 2. One Signal Per Asset Rule
-- Enforced at database level with `active_signal_registry` table
-- Prevents duplicate signals on the same symbol
-- Signals must close before new ones can be generated
+### 2. Concurrent Signals Per Symbol
+- **`active_signal_registry`** upserts the **latest** signal per symbol (pointer for tooling/UI); generation is **not** blocked when other active signals exist
+- Multiple **`signals`** rows per symbol can be active until each **`expires_at`**
 
 ### 3. High-Quality Signal Filtering
 - Minimum 75% confidence requirement
@@ -47,12 +46,15 @@ A fully automated, real-time trading signal generation system that continuously 
 - Validates signals across multiple timeframes
 - Rejects counter-trend signals when higher timeframes disagree
 
-### 6. Automatic Signal Lifecycle Management
-- Monitors all active signals every 5 minutes
-- Automatically detects when TP1, TP2, TP3, or SL is hit
-- Closes signals and records outcomes
-- Removes expired signals
-- Updates active signal registry
+### 6. Automatic Trade & Signal Lifecycle
+- **`monitor-signal-outcomes`** checks **open `trades`** every 5 minutes using **per-user** SL/TP on each trade row vs Deriv price
+- Closes **trades** on TP/SL; does **not** close the shared **`signals`** row when one user finishes
+- Expires overdue **`signals`** by `expires_at` (`EXPIRED`)
+- EA reports (`mt5-report-trade` / `mt5-report-positions`) update **`trades`** only, not global signal closure for everyone
+
+### Stale signal protection (EA + `mt5-get-instructions`)
+- **Server**: `SIGNAL_INSTRUCTION_MAX_AGE_SECONDS` (default **300**) — skips **first** dispatch of ACTIVE signals older than this; **retries** (existing `sent` trade row) still receive instructions (`is_retry_dispatch: 1`).
+- **EA inputs**: `MaxSignalAgeSeconds` (default **300**, **0** = off), `EntryMaxDeviationPoints` (default **150**, **0** = off) — blocks opens when price has moved too far from `entry_price` (in symbol **points**).
 
 ### 7. Real-Time Frontend Updates
 - Live status indicator with pulsing animation
@@ -86,16 +88,15 @@ A fully automated, real-time trading signal generation system that continuously 
 
 ### Edge Functions
 - `supabase/functions/auto-generate-signals/index.ts`
-  - Automated signal generation every 15 minutes
+  - Automated signal generation on schedule
   - Parallel symbol processing
-  - Conflict prevention checks
-  - Trigger recording
+  - No skip for “already active” symbol (detector-driven)
+  - Trigger recording; optional registry upsert
 
 - `supabase/functions/monitor-signal-outcomes/index.ts`
-  - Monitors active signals every 5 minutes
-  - Detects TP/SL hits
-  - Automatic signal closure
-  - Outcome recording
+  - Monitors open **trades** every 5 minutes (user SL/TP)
+  - Detects TP/SL hits on trade rows
+  - Expires overdue **signals** by time
 
 ### Frontend
 - `src/pages/Signals.tsx`
@@ -124,7 +125,7 @@ A fully automated, real-time trading signal generation system that continuously 
 ┌─────────────────────────────────────────────────────────────┐
 │              Advanced Signal Detection Engine                │
 │  • Fetch market data from Deriv API (200 ticks)             │
-│  • Check active_signal_registry (conflict prevention)        │
+│  • Optional register_active_signal (latest pointer per symbol) │
 │  • Analyze indicators (RSI, MACD, BB, EMA, Trend, ATR)      │
 │  • Detect candlestick patterns (7 patterns)                  │
 │  • Multi-timeframe validation (M5, M15, M30, H1)            │
@@ -135,9 +136,10 @@ A fully automated, real-time trading signal generation system that continuously 
 ┌─────────────────────────────────────────────────────────────┐
 │                  PostgreSQL Database                         │
 │  • signals - Main signal records                            │
-│  • active_signal_registry - Conflict prevention             │
+│  • active_signal_registry - Latest signal pointer per symbol │
 │  • signal_triggers - Indicator confirmations                │
-│  • signal_outcomes - Performance tracking                   │
+│  • trades - Per-user outcomes (SL/TP, P/L)                  │
+│  • signal_outcomes - Legacy global row per signal (optional) │
 └─────────────────────────────────────────────────────────────┘
                     ↓
 ┌─────────────────────────────────────────────────────────────┐

@@ -1,26 +1,54 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
+import { openTawkChat } from './TawkWidget';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, History, Sun, Moon, Activity } from 'lucide-react';
+import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, Sun, Moon, Bell, BellRing, MessageCircle, Crown } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { playNewSignalAlert, unlockAudio } from '../lib/soundAlert';
+import logoLight from '../assets/Vixai-logo.png';
+import logoDark from '../assets/Vixai-logo-dark.png';
 
 interface DashboardLayoutProps {
   children: ReactNode;
-  currentPage: 'home' | 'signals' | 'past-signals' | 'performance' | 'settings' | 'live-analysis';
+  currentPage: 'home' | 'signals' | 'past-signals' | 'performance' | 'settings' | 'live-analysis' | 'pricing';
 }
 
 export function DashboardLayout({ children, currentPage }: DashboardLayoutProps) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, tradingMode, setTradingMode } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notificationCount, setNotificationCount] = useState(0);
 
   const navigation = [
     { name: 'Dashboard', icon: Home, page: 'home' },
     { name: 'Live Signals', icon: TrendingUp, page: 'signals' },
-    { name: 'Live Analysis', icon: Activity, page: 'live-analysis' },
-    { name: 'Past Signals', icon: History, page: 'past-signals' },
     { name: 'Performance', icon: BarChart3, page: 'performance' },
+    { name: 'Pricing', icon: Crown, page: 'pricing' },
     { name: 'Settings', icon: Settings, page: 'settings' },
   ];
+
+  // Subscribe globally to new signals to drive the notification badge
+  useEffect(() => {
+    const channel = supabase
+      .channel('header-signal-notifications')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'signals' },
+        (payload) => {
+          const newSignal = payload.new as any;
+          if (newSignal && newSignal.is_active) {
+            setNotificationCount((prev) => prev + 1);
+            // Attempt to play sound when a new signal notification arrives
+            playNewSignalAlert();
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-white dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
@@ -31,13 +59,12 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
         `}>
           <div className="flex items-center justify-between p-6 border-b border-slate-300 dark:border-slate-700">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-emerald-600 rounded-lg flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-black dark:text-white font-bold">Deriv AI</h1>
-                <p className="text-xs text-slate-600 dark:text-slate-400">Trading Platform</p>
-              </div>
+              <img
+                src={theme === 'dark' ? logoDark : logoLight}
+                alt="VixAI"
+                className="h-9 w-auto rounded-lg object-contain"
+              />
+              
             </div>
             <button
               onClick={() => setMobileMenuOpen(false)}
@@ -103,15 +130,100 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
                 <Menu className="w-6 h-6" />
               </button>
               <div className="flex items-center gap-4 ml-auto">
-                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg">
+                <div className="hidden sm:inline-flex items-center rounded-full border border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/30 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setTradingMode('demo')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                      tradingMode === 'demo'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                    }`}
+                    aria-pressed={tradingMode === 'demo'}
+                  >
+                    Demo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTradingMode('live')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                      tradingMode === 'live'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                    }`}
+                    aria-pressed={tradingMode === 'live'}
+                  >
+                    Live
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotificationCount(0);
+                    // User interaction: unlock audio for future alerts
+                    unlockAudio();
+                    window.location.hash = '#signals';
+                  }}
+                  className="relative inline-flex items-center justify-center rounded-full p-2 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors"
+                  aria-label="Notifications"
+                >
+                  {notificationCount > 0 ? (
+                    <BellRing className="w-5 h-5" />
+                  ) : (
+                    <Bell className="w-5 h-5" />
+                  )}
+                  {notificationCount > 0 && (
+                    <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white">
+                      {notificationCount > 9 ? '9+' : notificationCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openTawkChat()}
+                  className="relative inline-flex items-center justify-center rounded-full p-2 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-700/60 transition-colors"
+                  aria-label="Open live chat"
+                >
+                  <MessageCircle className="w-5 h-5" />
+                </button>
+                <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-emerald-600/10 border border-emerald-600/30 rounded-lg">
                   <Wifi className="w-4 h-4 text-emerald-500" />
                   <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Connected</span>
                 </div>
               </div>
             </div>
+            <div className="sm:hidden px-6 pb-3">
+              <div className="inline-flex items-center rounded-full border border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/30 p-1">
+                <button
+                  type="button"
+                  onClick={() => setTradingMode('demo')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                    tradingMode === 'demo'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                  }`}
+                  aria-pressed={tradingMode === 'demo'}
+                >
+                  Demo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTradingMode('live')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                    tradingMode === 'live'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                  }`}
+                  aria-pressed={tradingMode === 'live'}
+                >
+                  Live
+                </button>
+              </div>
+            </div>
           </header>
 
           <main className="p-6">
+            {/* <TradingModeBanner /> */}
             {children}
           </main>
         </div>

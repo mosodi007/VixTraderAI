@@ -1,6 +1,7 @@
+//Ai-signal-generator.
+
 import { TechnicalAnalyzer, MarketAnalysis, TickData } from './technical-indicators.ts';
 import { DerivAPI } from './deriv-api.ts';
-import { getPipSize } from './symbol-sl-tp.ts';
 
 export interface AISignal {
   symbol: string;
@@ -37,15 +38,10 @@ export class AISignalGenerator {
   formatMT5Symbol(symbol: string): string {
     const symbolMap: Record<string, string> = {
       'R_10': 'Volatility 10 Index',
+      'R_25': 'Volatility 25 Index',
       'R_50': 'Volatility 50 Index',
+      'R_75': 'Volatility 75 Index',
       'R_100': 'Volatility 100 Index',
-      '1HZ10V': 'Volatility 10 (1s) Index',
-      '1HZ30V': 'Volatility 30 (1s) Index',
-      '1HZ50V': 'Volatility 50 (1s) Index',
-      '1HZ90V': 'Volatility 90 (1s) Index',
-      '1HZ100V': 'Volatility 100 (1s) Index',
-      'stpRNG': 'Step Index',
-      'JD25': 'Jump 25 Index',
       'CRASH300N': 'Crash 300 Index',
       'CRASH500N': 'Crash 500 Index',
       'CRASH1000N': 'Crash 1000 Index',
@@ -57,9 +53,23 @@ export class AISignalGenerator {
     return symbolMap[symbol] || symbol;
   }
 
-  /** Uses shared pip size from symbol-sl-tp for consistent SL/TP across the app. */
   calculatePipSize(symbol: string): number {
-    return getPipSize(symbol);
+    if (symbol.includes('JPY')) return 0.01;
+    if (symbol.startsWith('XAU') || symbol.startsWith('XAG')) return 0.01;
+    if (symbol.includes('BTC') || symbol.includes('ETH')) return 1.0;
+
+    if (symbol.startsWith('R_')) {
+      if (symbol === 'R_10' || symbol === 'R_25' || symbol === 'R_50' || symbol === 'R_100') {
+        return 1.0;
+      }
+      if (symbol === 'R_75') {
+        return 10.0;
+      }
+    }
+
+    if (symbol.includes('CRASH') || symbol.includes('BOOM')) return 1.0;
+
+    return 0.0001;
   }
 
   calculatePips(symbol: string, price1: number, price2: number): number {
@@ -195,38 +205,61 @@ Provide a concise trading analysis (2-3 sentences) explaining the key factors in
 
     const entryPrice = marketAnalysis.currentPrice;
     const pipSize = this.calculatePipSize(symbol);
-    const atrMultiplier = marketAnalysis.indicators.volatility === 'high' ? 2.5 :
-                         marketAnalysis.indicators.volatility === 'low' ? 1.0 : 1.5;
+
+    let baseStopLossPips: number;
+    let atrMultiplier: number;
+
+    if (symbol.startsWith('R_')) {
+      if (symbol === 'R_10') {
+        baseStopLossPips = 150;
+        atrMultiplier = 3.0;
+      } else if (symbol === 'R_25') {
+        baseStopLossPips = 200;
+        atrMultiplier = 3.5;
+      } else if (symbol === 'R_50') {
+        baseStopLossPips = 250;
+        atrMultiplier = 4.0;
+      } else if (symbol === 'R_75') {
+        baseStopLossPips = 300;
+        atrMultiplier = 4.5;
+      } else if (symbol === 'R_100') {
+        baseStopLossPips = 350;
+        atrMultiplier = 5.0;
+      } else {
+        baseStopLossPips = 200;
+        atrMultiplier = 3.0;
+      }
+    } else if (symbol.includes('CRASH') || symbol.includes('BOOM')) {
+      baseStopLossPips = 400;
+      atrMultiplier = 5.0;
+    } else {
+      baseStopLossPips = 80;
+      atrMultiplier = marketAnalysis.indicators.volatility === 'high' ? 2.5 :
+                     marketAnalysis.indicators.volatility === 'low' ? 1.5 : 2.0;
+    }
 
     let stopLossPips: number;
     let takeProfitPips: number;
 
     const atrPips = this.calculatePips(symbol, 0, marketAnalysis.indicators.atr);
 
-    if (atrPips > 0) {
-      stopLossPips = Math.round(atrPips * atrMultiplier);
-      takeProfitPips = Math.round(stopLossPips * 2);
+    if (atrPips > 10) {
+      stopLossPips = Math.max(baseStopLossPips, Math.round(atrPips * atrMultiplier));
+      takeProfitPips = Math.round(stopLossPips * 2.5);
     } else {
       if (timeframe === 'M1' || timeframe === 'M5') {
-        stopLossPips = 50;
-        takeProfitPips = 100;
+        stopLossPips = Math.max(baseStopLossPips * 0.7, 100);
+        takeProfitPips = stopLossPips * 2.5;
       } else if (timeframe === 'M15' || timeframe === 'M30') {
-        stopLossPips = 80;
-        takeProfitPips = 160;
+        stopLossPips = baseStopLossPips;
+        takeProfitPips = stopLossPips * 2.5;
       } else if (timeframe === 'H1') {
-        stopLossPips = 120;
-        takeProfitPips = 240;
+        stopLossPips = baseStopLossPips * 1.3;
+        takeProfitPips = stopLossPips * 2.5;
       } else {
-        stopLossPips = 200;
-        takeProfitPips = 400;
+        stopLossPips = baseStopLossPips * 1.5;
+        takeProfitPips = stopLossPips * 2.5;
       }
-    }
-
-    // Ensure minimum stop loss for MT5 compatibility (especially for synthetic indices)
-    const minStopLossPips = 50;
-    if (stopLossPips < minStopLossPips) {
-      stopLossPips = minStopLossPips;
-      takeProfitPips = stopLossPips * 2;
     }
 
     let stopLoss: number;
@@ -238,15 +271,21 @@ Provide a concise trading analysis (2-3 sentences) explaining the key factors in
 
       if (marketAnalysis.supportLevels.length > 0) {
         const nearestSupport = marketAnalysis.supportLevels.find(s => s < entryPrice);
-        if (nearestSupport && nearestSupport > stopLoss) {
-          stopLoss = nearestSupport - (pipSize * 5);
+        if (nearestSupport) {
+          const supportDistance = this.calculatePips(symbol, entryPrice, nearestSupport);
+          if (supportDistance > 0 && supportDistance < stopLossPips * 1.5) {
+            stopLoss = Math.max(stopLoss, nearestSupport - (pipSize * 20));
+          }
         }
       }
 
       if (marketAnalysis.resistanceLevels.length > 0) {
         const nearestResistance = marketAnalysis.resistanceLevels.find(r => r > entryPrice);
-        if (nearestResistance && nearestResistance < takeProfit) {
-          takeProfit = nearestResistance - (pipSize * 5);
+        if (nearestResistance) {
+          const resistanceDistance = this.calculatePips(symbol, entryPrice, nearestResistance);
+          if (resistanceDistance > 0 && resistanceDistance < takeProfitPips * 0.8) {
+            takeProfit = Math.min(takeProfit, nearestResistance - (pipSize * 20));
+          }
         }
       }
     } else {
@@ -255,21 +294,30 @@ Provide a concise trading analysis (2-3 sentences) explaining the key factors in
 
       if (marketAnalysis.resistanceLevels.length > 0) {
         const nearestResistance = marketAnalysis.resistanceLevels.find(r => r > entryPrice);
-        if (nearestResistance && nearestResistance < stopLoss) {
-          stopLoss = nearestResistance + (pipSize * 5);
+        if (nearestResistance) {
+          const resistanceDistance = this.calculatePips(symbol, nearestResistance, entryPrice);
+          if (resistanceDistance > 0 && resistanceDistance < stopLossPips * 1.5) {
+            stopLoss = Math.min(stopLoss, nearestResistance + (pipSize * 20));
+          }
         }
       }
 
       if (marketAnalysis.supportLevels.length > 0) {
         const nearestSupport = marketAnalysis.supportLevels.find(s => s < entryPrice);
-        if (nearestSupport && nearestSupport > takeProfit) {
-          takeProfit = nearestSupport + (pipSize * 5);
+        if (nearestSupport) {
+          const supportDistance = this.calculatePips(symbol, nearestSupport, entryPrice);
+          if (supportDistance > 0 && supportDistance < takeProfitPips * 0.8) {
+            takeProfit = Math.max(takeProfit, nearestSupport + (pipSize * 20));
+          }
         }
       }
     }
 
-    stopLossPips = this.calculatePips(symbol, entryPrice, stopLoss);
-    takeProfitPips = this.calculatePips(symbol, entryPrice, takeProfit);
+    const finalStopLossPips = this.calculatePips(symbol, entryPrice, stopLoss);
+    const finalTakeProfitPips = this.calculatePips(symbol, entryPrice, takeProfit);
+
+    stopLossPips = Math.round(finalStopLossPips);
+    takeProfitPips = Math.round(finalTakeProfitPips);
 
     const riskReward = this.calculateRiskReward(entryPrice, stopLoss, takeProfit, direction);
     const signalType = this.determineSignalType(marketAnalysis);

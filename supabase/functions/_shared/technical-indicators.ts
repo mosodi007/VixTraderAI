@@ -1,3 +1,5 @@
+//Technical Indicator
+
 export interface TickData {
   epoch: number;
   quote: number;
