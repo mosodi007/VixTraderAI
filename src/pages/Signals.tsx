@@ -565,38 +565,7 @@ export function Signals() {
             </div>
           )}
 
-          {hasActiveSubscription && isVerifiedMember === false && (
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-yellow-700 dark:text-yellow-300 mb-2">
-                {verificationStatus === 'pending' ? 'MT5 verification in progress' : verificationStatus === 'rejected' ? 'MT5 verification failed' : 'Verify your MT5 to view Live Signals'}
-              </h3>
-              <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">
-                {verificationStatus === 'pending'
-                  ? 'We are reviewing your account, we will notify you via email when we are done.'
-                  : verificationStatus === 'rejected'
-                    ? 'Your MT5 account was rejected. Please create a new MT5 account in Deriv and submit the new login in Settings.'
-                    : 'Live Signals unlock after your live MT5 account is verified.'}
-              </p>
-              <div className="flex flex-wrap gap-3">
-                <a
-                  href="#settings"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
-                >
-                  Go to Settings
-                </a>
-                <a
-                  href={DERIV_MT5_CREATE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-medium rounded-lg transition-colors"
-                >
-                  Create MT5 on Deriv
-                </a>
-              </div>
-            </div>
-          )}
-
-          {hasActiveSubscription && isVerifiedMember === true && mt5Connected === false && (
+          {hasActiveSubscription && mt5Connected === false && (
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6">
               <h3 className="text-lg font-bold text-yellow-700 dark:text-yellow-300 mb-2">Connect MT5 to view Live Signals</h3>
               <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">
@@ -621,7 +590,7 @@ export function Signals() {
             </div>
           )}
 
-          {hasActiveSubscription && isVerifiedMember === true && (
+          {hasActiveSubscription && (
             <button
               type="button"
               onClick={() => setShowLiveAnalysis((prev) => !prev)}
@@ -633,7 +602,7 @@ export function Signals() {
             </button>
           )}
 
-          {hasActiveSubscription && isVerifiedMember === true && (
+          {hasActiveSubscription && (
             <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-lg dark:shadow-none">
               <div className="p-6 border-b border-slate-300 dark:border-slate-700">
                 <div className="flex items-center justify-between">
