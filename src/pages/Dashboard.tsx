@@ -99,7 +99,7 @@ export function Dashboard() {
                   Connect your MT5 Login
                 </h3>
                 <p className="text-emerald-100 mb-6">
-                  Connect your {tradingMode === 'live' ? 'Live' : 'Demo'} MT5 account to activate your free trial and start receiving AI-powered trading signals.
+                  Connect your {tradingMode === 'live' ? 'Live' : 'Demo'} MT5 account to start receiving AI-powered trading signals and automated EA trading.
                 </p>
                 <div className="bg-white/10 border border-white/20 rounded-lg p-4 mb-6">
                   <p className="text-white font-medium mb-2">What you'll get:</p>
