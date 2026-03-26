@@ -470,14 +470,9 @@ export function Signals() {
   }, [user, loadSignals, monitorSignalPrices]);
 
   useEffect(() => {
-    if (mt5Connected) {
-      void loadSignals();
-      void monitorSignalPrices();
-    } else {
-      setSignals([]);
-      setLoading(false);
-    }
-  }, [mt5Connected, loadSignals, monitorSignalPrices]);
+    void loadSignals();
+    void monitorSignalPrices();
+  }, [loadSignals, monitorSignalPrices]);
 
   const groupSignalsByDate = (signals: Signal[]): GroupedSignals => {
     const grouped: GroupedSignals = {};
@@ -565,36 +560,10 @@ export function Signals() {
             </div>
           )}
 
-          {hasActiveSubscription && mt5Connected === false && (
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-yellow-700 dark:text-yellow-300 mb-2">Connect MT5 to view Live Signals</h3>
-              <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">
-                Live Signals are only available when your MT5 Expert Advisor is connected and sending heartbeats.
-              </p>
-              <div className="flex flex-wrap gap-3">
-                <a
-                  href="#settings"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-colors"
-                >
-                  Go to Settings
-                </a>
-                <a
-                  href={DERIV_MT5_CREATE_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-900 dark:text-white font-medium rounded-lg transition-colors"
-                >
-                  Create MT5 on Deriv
-                </a>
-              </div>
-            </div>
-          )}
-
           {hasActiveSubscription && (
             <button
               type="button"
               onClick={() => setShowLiveAnalysis((prev) => !prev)}
-              disabled={mt5Connected === false}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-medium text-slate-700 dark:text-slate-200 hover:border-emerald-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
             >
               <Activity className="w-4 h-4" />
