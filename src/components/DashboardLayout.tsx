@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { openTawkChat } from './TawkWidget';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, Sun, Moon, Bell, BellRing, MessageCircle } from 'lucide-react';
+import { TrendingUp, Home, Settings, BarChart3, Wifi, LogOut, Menu, X, Sun, Moon, Bell, BellRing, MessageCircle, Crown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { playNewSignalAlert, unlockAudio } from '../lib/soundAlert';
 import logoLight from '../assets/Vixai-logo.png';
@@ -10,7 +10,7 @@ import logoDark from '../assets/Vixai-logo-dark.png';
 
 interface DashboardLayoutProps {
   children: ReactNode;
-  currentPage: 'home' | 'signals' | 'past-signals' | 'performance' | 'settings' | 'live-analysis';
+  currentPage: 'home' | 'signals' | 'past-signals' | 'performance' | 'settings' | 'live-analysis' | 'pricing';
 }
 
 export function DashboardLayout({ children, currentPage }: DashboardLayoutProps) {
@@ -22,8 +22,8 @@ export function DashboardLayout({ children, currentPage }: DashboardLayoutProps)
   const navigation = [
     { name: 'Dashboard', icon: Home, page: 'home' },
     { name: 'Live Signals', icon: TrendingUp, page: 'signals' },
-    // { name: 'Past Signals', icon: History, page: 'past-signals' },
     { name: 'Performance', icon: BarChart3, page: 'performance' },
+    { name: 'Pricing', icon: Crown, page: 'pricing' },
     { name: 'Settings', icon: Settings, page: 'settings' },
   ];
 

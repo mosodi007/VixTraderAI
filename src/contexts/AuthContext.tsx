@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase';
 
 export type TradingMode = 'demo' | 'live';
 
+export type SubscriptionStatus = 'trialing' | 'active' | 'canceled' | 'past_due' | 'incomplete' | 'incomplete_expired' | 'unpaid';
+
 export type Profile = {
   id: string;
   email: string;
@@ -11,6 +13,9 @@ export type Profile = {
   trading_mode: TradingMode;
   email_verified_at?: string | null;
   email_verification_expires_at?: string | null;
+  subscription_status?: SubscriptionStatus | null;
+  trial_ends_at?: string | null;
+  stripe_customer_id?: string | null;
 };
 
 interface AuthContextType {
@@ -19,6 +24,8 @@ interface AuthContextType {
   profile: Profile | null;
   tradingMode: TradingMode;
   hasVerifiedLiveMt5: boolean;
+  hasActiveSubscription: boolean;
+  isTrialing: boolean;
   loading: boolean;
   signUp: (
     email: string,
@@ -40,6 +47,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [tradingMode, setTradingModeState] = useState<TradingMode>('demo');
   const [hasVerifiedLiveMt5, setHasVerifiedLiveMt5] = useState(false);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
+  const [isTrialing, setIsTrialing] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const isGoogleUser = (u: User) =>
@@ -51,12 +60,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
       setTradingModeState('demo');
       setHasVerifiedLiveMt5(false);
+      setHasActiveSubscription(false);
+      setIsTrialing(false);
       return;
     }
 
     let { data: prof } = await supabase
       .from('profiles')
-      .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at')
+      .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at,subscription_status,trial_ends_at,stripe_customer_id')
       .eq('id', nextUser.id)
       .maybeSingle();
 
@@ -76,13 +87,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           full_name: metaFullName,
           trading_mode: 'demo',
           email_verified_at: google ? new Date().toISOString() : null,
+          subscription_status: 'trialing',
+          trial_ends_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
         },
         { onConflict: 'id' },
       );
       if (!upsertErr) {
         const { data: again } = await supabase
           .from('profiles')
-          .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at')
+          .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at,subscription_status,trial_ends_at,stripe_customer_id')
           .eq('id', nextUser.id)
           .maybeSingle();
         prof = again;
@@ -100,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('id', nextUser.id);
       const { data: again } = await supabase
         .from('profiles')
-        .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at')
+        .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at,subscription_status,trial_ends_at,stripe_customer_id')
         .eq('id', nextUser.id)
         .maybeSingle();
       prof = again;
@@ -115,11 +128,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         trading_mode: 'demo',
         email_verified_at: null,
         email_verification_expires_at: null,
+        subscription_status: 'trialing',
+        trial_ends_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
       };
       setProfile(fallback);
       setTradingModeState(fallback.trading_mode);
+      setIsTrialing(true);
+      setHasActiveSubscription(true);
     } else {
       const mode = (prof as any).trading_mode === 'live' ? 'live' : 'demo';
+      const subscriptionStatus = (prof as any).subscription_status;
+      const trialEndsAt = (prof as any).trial_ends_at;
+      const isInTrial = subscriptionStatus === 'trialing' && trialEndsAt && new Date(trialEndsAt) > new Date();
+      const hasActiveSub = subscriptionStatus === 'active' || isInTrial;
+
       const nextProfile: Profile = {
         id: prof.id,
         email: prof.email ?? nextUser.email ?? '',
@@ -127,9 +149,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         trading_mode: mode,
         email_verified_at: (prof as any).email_verified_at ?? null,
         email_verification_expires_at: (prof as any).email_verification_expires_at ?? null,
+        subscription_status: subscriptionStatus ?? 'trialing',
+        trial_ends_at: trialEndsAt ?? null,
+        stripe_customer_id: (prof as any).stripe_customer_id ?? null,
       };
       setProfile(nextProfile);
       setTradingModeState(nextProfile.trading_mode);
+      setIsTrialing(isInTrial);
+      setHasActiveSubscription(hasActiveSub);
     }
 
     const { data: liveAcct } = await supabase
@@ -263,6 +290,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         tradingMode,
         hasVerifiedLiveMt5,
+        hasActiveSubscription,
+        isTrialing,
         loading,
         signUp,
         signIn,
