@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { DashboardLayout } from '../components/DashboardLayout';
+import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
-import { Check, ArrowLeft } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 export function Pricing() {
@@ -93,20 +95,13 @@ export function Pricing() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <button
-          onClick={() => window.history.back()}
-          className="mb-8 flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back
-        </button>
-
-        <div className="text-center mb-12">
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            Simple, Transparent Pricing
-          </h1>
+    <ProtectedRoute>
+      <DashboardLayout>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="text-center mb-12">
+            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+              Simple, Transparent Pricing
+            </h1>
 
           {!hasActiveSubscription && !isTrialing && (
             <p className="text-xl text-slate-300 mb-8">
@@ -306,7 +301,8 @@ export function Pricing() {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+        </div>
+      </DashboardLayout>
+    </ProtectedRoute>
   );
 }
