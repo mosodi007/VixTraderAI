@@ -177,7 +177,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // create Checkout Session with trial configuration
+    // create Checkout Session - NO TRIAL (trial is handled in app when user connects MT5)
     const sessionConfig: Stripe.Checkout.SessionCreateParams = {
       customer: customerId,
       payment_method_types: ['card'],
@@ -195,10 +195,9 @@ Deno.serve(async (req) => {
       },
     };
 
-    // Add 3-day trial for subscription mode
+    // Add subscription metadata (NO trial period - trial is handled by app)
     if (mode === 'subscription') {
       sessionConfig.subscription_data = {
-        trial_period_days: 3,
         metadata: {
           user_id: user.id,
         },

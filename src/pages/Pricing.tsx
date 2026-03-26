@@ -107,14 +107,25 @@ export function Pricing() {
           <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
             Simple, Transparent Pricing
           </h1>
-          <p className="text-xl text-slate-300 mb-8">
-            Start your 3-day free trial. No credit card required.
-          </p>
+
+          {!hasActiveSubscription && !isTrialing && (
+            <p className="text-xl text-slate-300 mb-8">
+              Get 3 days free when you connect your MT5 account
+            </p>
+          )}
 
           {isTrialing && trialDaysLeft > 0 && (
             <div className="inline-block bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-6 py-3 mb-8">
               <p className="text-emerald-400 font-medium">
                 You have {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial
+              </p>
+            </div>
+          )}
+
+          {hasActiveSubscription && (
+            <div className="inline-block bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-6 py-3 mb-8">
+              <p className="text-emerald-400 font-medium">
+                You have an active Pro subscription
               </p>
             </div>
           )}
@@ -201,14 +212,12 @@ export function Pricing() {
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                   Processing...
                 </span>
-              ) : !hasStartedTrial ? (
-                'Start Free Trial'
               ) : hasActiveSubscription ? (
                 'Already Subscribed'
               ) : isTrialing ? (
-                'Upgrade Now'
+                'Subscribe Now'
               ) : (
-                `Subscribe - ${billingInterval === 'monthly' ? 'Monthly' : 'Annual'}`
+                'Subscribe Now'
               )}
             </button>
 
@@ -224,8 +233,8 @@ export function Pricing() {
             <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-6 text-left">
               <h4 className="text-lg font-semibold text-white mb-2">How does the free trial work?</h4>
               <p className="text-slate-300">
-                You get 3 days of full access to all Pro features. No credit card required to start.
-                After the trial, you can choose to subscribe to continue using the service.
+                When you connect your MT5 account, you get 3 days of full access to all Pro features at no cost.
+                No credit card required for the trial. After the trial ends, subscribe to continue receiving signals.
               </p>
             </div>
             <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-6 text-left">

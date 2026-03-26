@@ -151,7 +151,7 @@ async function syncCustomerFromStripe(customerId: string) {
     if (subscriptions.data.length === 0) {
       console.info(`No active subscriptions found for customer: ${customerId}`);
 
-      // Update both stripe_subscriptions and profiles
+      // Update stripe_subscriptions to reflect no active subscription
       const { error: noSubError } = await supabase.from('stripe_subscriptions').upsert(
         {
           customer_id: customerId,
@@ -166,14 +166,8 @@ async function syncCustomerFromStripe(customerId: string) {
         console.error('Error updating subscription status:', noSubError);
       }
 
-      // Update profile
-      await supabase
-        .from('profiles')
-        .update({
-          subscription_status: 'trialing',
-          trial_ends_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-        })
-        .eq('id', userId);
+      // DO NOT update profile here - trials are handled by MT5 connection trigger
+      // Profile status should remain as is (inactive or existing trial)
 
       return;
     }
