@@ -276,7 +276,7 @@ function LiveAnalysisConsoleInline() {
 }
 
 export function Signals() {
-  const { user } = useAuth();
+  const { user, hasActiveSubscription, profile, tradingMode } = useAuth();
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
@@ -518,6 +518,11 @@ export function Signals() {
   const activeSignalsList = signals.filter((s) => s.is_active !== false);
   const groupedSignals = groupSignalsByDate(activeSignalsList);
 
+  const trialEndsAt = profile?.trial_ends_at ? new Date(profile.trial_ends_at) : null;
+  const trialDaysLeft = trialEndsAt
+    ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+    : 0;
+
   return (
     <ProtectedRoute>
       <DashboardLayout currentPage="signals">
@@ -527,7 +532,40 @@ export function Signals() {
             <p className="text-slate-600 dark:text-slate-400">AI-powered Volatility Index trading signals will appear here</p>
           </div>
 
-          {isVerifiedMember === false && (
+          {!hasActiveSubscription && (
+            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 text-center border border-slate-700">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-500/10 rounded-full mb-4">
+                <Shield className="w-8 h-8 text-emerald-500" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">
+                {profile?.subscription_status === 'inactive' ? 'Start Your Free Trial' : 'Trial Expired'}
+              </h3>
+              <p className="text-slate-300 mb-6">
+                {profile?.subscription_status === 'inactive'
+                  ? `Connect your ${tradingMode === 'live' ? 'Live' : 'Demo'} MT5 account to activate your 3-day free trial and start receiving signals.`
+                  : 'Your free trial has ended. Subscribe to continue receiving trading signals.'}
+              </p>
+              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                {profile?.subscription_status === 'inactive' ? (
+                  <a
+                    href="#settings"
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-semibold rounded-lg transition-all shadow-lg"
+                  >
+                    Connect MT5 & Start Trial
+                  </a>
+                ) : (
+                  <a
+                    href="#pricing"
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-semibold rounded-lg transition-all shadow-lg"
+                  >
+                    View Pricing Plans
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {hasActiveSubscription && isVerifiedMember === false && (
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6">
               <h3 className="text-lg font-bold text-yellow-700 dark:text-yellow-300 mb-2">
                 {verificationStatus === 'pending' ? 'MT5 verification in progress' : verificationStatus === 'rejected' ? 'MT5 verification failed' : 'Verify your MT5 to view Live Signals'}
@@ -558,7 +596,7 @@ export function Signals() {
             </div>
           )}
 
-          {isVerifiedMember === true && mt5Connected === false && (
+          {hasActiveSubscription && isVerifiedMember === true && mt5Connected === false && (
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6">
               <h3 className="text-lg font-bold text-yellow-700 dark:text-yellow-300 mb-2">Connect MT5 to view Live Signals</h3>
               <p className="text-sm text-slate-700 dark:text-slate-300 mb-4">
@@ -583,7 +621,7 @@ export function Signals() {
             </div>
           )}
 
-          {isVerifiedMember === true && (
+          {hasActiveSubscription && isVerifiedMember === true && (
             <button
               type="button"
               onClick={() => setShowLiveAnalysis((prev) => !prev)}
@@ -595,7 +633,7 @@ export function Signals() {
             </button>
           )}
 
-          {isVerifiedMember === true && (
+          {hasActiveSubscription && isVerifiedMember === true && (
             <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-lg dark:shadow-none">
               <div className="p-6 border-b border-slate-300 dark:border-slate-700">
                 <div className="flex items-center justify-between">

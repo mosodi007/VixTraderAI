@@ -13,8 +13,9 @@ export type Profile = {
   trading_mode: TradingMode;
   email_verified_at?: string | null;
   email_verification_expires_at?: string | null;
-  subscription_status?: SubscriptionStatus | null;
+  subscription_status?: SubscriptionStatus | 'inactive' | null;
   trial_ends_at?: string | null;
+  trial_started_at?: string | null;
   stripe_customer_id?: string | null;
 };
 
@@ -67,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let { data: prof } = await supabase
       .from('profiles')
-      .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at,subscription_status,trial_ends_at,stripe_customer_id')
+      .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at,subscription_status,trial_ends_at,trial_started_at,stripe_customer_id')
       .eq('id', nextUser.id)
       .maybeSingle();
 
@@ -87,15 +88,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           full_name: metaFullName,
           trading_mode: 'demo',
           email_verified_at: google ? new Date().toISOString() : null,
-          subscription_status: 'trialing',
-          trial_ends_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+          subscription_status: 'inactive',
         },
         { onConflict: 'id' },
       );
       if (!upsertErr) {
         const { data: again } = await supabase
           .from('profiles')
-          .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at,subscription_status,trial_ends_at,stripe_customer_id')
+          .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at,subscription_status,trial_ends_at,trial_started_at,stripe_customer_id')
           .eq('id', nextUser.id)
           .maybeSingle();
         prof = again;
@@ -113,7 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('id', nextUser.id);
       const { data: again } = await supabase
         .from('profiles')
-        .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at,subscription_status,trial_ends_at,stripe_customer_id')
+        .select('id,email,full_name,trading_mode,email_verified_at,email_verification_expires_at,subscription_status,trial_ends_at,trial_started_at,stripe_customer_id')
         .eq('id', nextUser.id)
         .maybeSingle();
       prof = again;
@@ -128,17 +128,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         trading_mode: 'demo',
         email_verified_at: null,
         email_verification_expires_at: null,
-        subscription_status: 'trialing',
-        trial_ends_at: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        subscription_status: 'inactive',
+        trial_ends_at: null,
+        trial_started_at: null,
       };
       setProfile(fallback);
       setTradingModeState(fallback.trading_mode);
-      setIsTrialing(true);
-      setHasActiveSubscription(true);
+      setIsTrialing(false);
+      setHasActiveSubscription(false);
     } else {
       const mode = (prof as any).trading_mode === 'live' ? 'live' : 'demo';
       const subscriptionStatus = (prof as any).subscription_status;
       const trialEndsAt = (prof as any).trial_ends_at;
+      const trialStartedAt = (prof as any).trial_started_at;
       const isInTrial = subscriptionStatus === 'trialing' && trialEndsAt && new Date(trialEndsAt) > new Date();
       const hasActiveSub = subscriptionStatus === 'active' || isInTrial;
 
@@ -149,8 +151,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         trading_mode: mode,
         email_verified_at: (prof as any).email_verified_at ?? null,
         email_verification_expires_at: (prof as any).email_verification_expires_at ?? null,
-        subscription_status: subscriptionStatus ?? 'trialing',
+        subscription_status: subscriptionStatus ?? 'inactive',
         trial_ends_at: trialEndsAt ?? null,
+        trial_started_at: trialStartedAt ?? null,
         stripe_customer_id: (prof as any).stripe_customer_id ?? null,
       };
       setProfile(nextProfile);
