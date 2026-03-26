@@ -38,6 +38,8 @@ interface AuthContextType {
   setTradingMode: (mode: TradingMode) => Promise<{ error: Error | null }>;
   /** Opens Google OAuth; browser redirects away on success. */
   signInWithGoogle: () => Promise<{ error: Error | null }>;
+  /** Manually refresh profile and subscription data from database */
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -51,6 +53,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
   const [isTrialing, setIsTrialing] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Public method to manually refresh profile data
+  const refreshProfile = async () => {
+    if (user) {
+      await loadProfileAndStatus(user);
+    }
+  };
 
   const isGoogleUser = (u: User) =>
     !!u.identities?.some((i) => i.provider === 'google') ||
@@ -301,6 +310,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signOut,
         setTradingMode,
         signInWithGoogle,
+        refreshProfile,
       }}
     >
       {children}

@@ -67,6 +67,8 @@ export function Pricing() {
 
       const { url } = await response.json();
       if (url) {
+        // Set a flag so we know to refresh profile when returning
+        localStorage.setItem('stripe_checkout_started', 'true');
         window.location.href = url;
       }
     } catch (err: any) {

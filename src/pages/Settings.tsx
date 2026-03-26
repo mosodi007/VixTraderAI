@@ -3,7 +3,7 @@ import { DashboardLayout } from '../components/DashboardLayout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Save, AlertCircle, CheckCircle, BarChart3, CreditCard, Crown } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle, BarChart3, CreditCard, Crown, RefreshCw } from 'lucide-react';
 import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 import { DemoAccountApprovedModal } from '../components/DemoAccountApprovedModal';
 
@@ -109,7 +109,7 @@ function formatMt5SaveError(err: { code?: string; message?: string } | null | un
 }
 
 export function Settings() {
-  const { user, tradingMode, profile, hasActiveSubscription, isTrialing } = useAuth();
+  const { user, tradingMode, profile, hasActiveSubscription, isTrialing, refreshProfile } = useAuth();
   const [demoAccount, setDemoAccount] = useState<any>(null);
   const [liveAccount, setLiveAccount] = useState<any>(null);
   const [demoLogin, setDemoLogin] = useState('');
@@ -146,6 +146,7 @@ export function Settings() {
   const [emailSignalsMessage, setEmailSignalsMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [showDemoApprovedModal, setShowDemoApprovedModal] = useState(false);
+  const [refreshingSubscription, setRefreshingSubscription] = useState(false);
 
   const dismissDemoApprovedModal = () => {
     setShowDemoApprovedModal(false);
@@ -155,25 +156,42 @@ export function Settings() {
   };
 
   useEffect(() => {
+    if (!user) return;
+
     loadDemoAndLiveAccounts();
     loadMt5Accounts();
     loadMinAiConfidence();
 
     // Refresh profile when returning from Stripe checkout
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('session_id')) {
-      // Remove the session_id from URL
-      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
-      // Force reload profile after short delay to allow webhook to process
-      setTimeout(() => {
-        if (user) {
-          supabase.auth.getSession().then(() => {
-            window.location.reload();
-          });
+    const checkStripeReturn = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const hasStripeSession = params.has('session_id');
+
+      // Also check localStorage for a flag we set before redirecting to Stripe
+      const stripeCheckoutStarted = localStorage.getItem('stripe_checkout_started');
+
+      if (hasStripeSession || stripeCheckoutStarted === 'true') {
+        // Clear the flag
+        localStorage.removeItem('stripe_checkout_started');
+
+        // Remove session_id from URL if present
+        if (hasStripeSession) {
+          window.history.replaceState({}, '', window.location.pathname + window.location.hash);
         }
-      }, 2000);
-    }
-  }, [user]);
+
+        // Show loading state
+        setRefreshingSubscription(true);
+
+        // Wait a moment for webhook to process, then refresh profile
+        setTimeout(async () => {
+          await refreshProfile();
+          setRefreshingSubscription(false);
+        }, 2000);
+      }
+    };
+
+    checkStripeReturn();
+  }, [user, refreshProfile]);
 
   useEffect(() => {
     if (!user) return;
@@ -707,6 +725,12 @@ export function Settings() {
     }
   };
 
+  const handleRefreshSubscription = async () => {
+    setRefreshingSubscription(true);
+    await refreshProfile();
+    setRefreshingSubscription(false);
+  };
+
   return (
     <ProtectedRoute>
       <DashboardLayout currentPage="settings">
@@ -722,6 +746,12 @@ export function Settings() {
 
           {/* Subscription Status */}
           <div className="bg-gradient-to-br from-emerald-600 to-emerald-500 rounded-2xl p-8 text-white shadow-lg">
+            {refreshingSubscription && (
+              <div className="mb-4 bg-white/20 rounded-lg px-4 py-3 flex items-center gap-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                <p className="text-white font-medium">Updating subscription status...</p>
+              </div>
+            )}
             <div className="flex items-start justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-2">
@@ -752,6 +782,15 @@ export function Settings() {
                 )}
               </div>
               <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleRefreshSubscription}
+                  disabled={refreshingSubscription}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+                  title="Refresh subscription status"
+                >
+                  <RefreshCw className={`w-4 h-4 ${refreshingSubscription ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
                 {hasActiveSubscription ? (
                   <button
                     onClick={handleManageSubscription}
