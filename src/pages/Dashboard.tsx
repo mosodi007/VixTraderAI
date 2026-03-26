@@ -96,7 +96,7 @@ export function Dashboard() {
             <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-2xl p-8 shadow-xl">
               <div className="max-w-2xl">
                 <h3 className="text-2xl font-bold text-white mb-4">
-                  Start Your Free 3-Day Trial
+                  Connect your MT5 Login
                 </h3>
                 <p className="text-emerald-100 mb-6">
                   Connect your {tradingMode === 'live' ? 'Live' : 'Demo'} MT5 account to activate your free trial and start receiving AI-powered trading signals.
