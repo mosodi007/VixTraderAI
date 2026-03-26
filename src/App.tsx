@@ -14,6 +14,7 @@ import { TermsOfService } from './pages/TermsOfService';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import { VerifyEmail } from './pages/VerifyEmail';
 import { Pricing } from './pages/Pricing';
+import { ResetPassword } from './pages/ResetPassword';
 import { TawkWidget } from './components/TawkWidget';
 
 function AppRoutes() {
@@ -31,6 +32,7 @@ function AppRoutes() {
     | 'privacy'
     | 'verify-email'
     | 'pricing'
+    | 'reset-password'
   >('home');
   const [authHash, setAuthHash] = useState(() => window.location.hash.slice(1));
   const authHashBase = authHash.split('?')[0];
@@ -55,7 +57,8 @@ function AppRoutes() {
         base === 'terms' ||
         base === 'privacy' ||
         base === 'verify-email' ||
-        base === 'pricing'
+        base === 'pricing' ||
+        base === 'reset-password'
       ) {
         setCurrentPage(base as any);
       }
@@ -85,6 +88,7 @@ function AppRoutes() {
     if (authHashBase === 'login' || authHashBase === 'signup') return <Login />;
     if (authHashBase === 'terms') return <TermsOfService />;
     if (authHashBase === 'privacy') return <PrivacyPolicy />;
+    if (authHashBase === 'reset-password') return <ResetPassword />;
     if (authHashBase === 'home' || authHashBase === '') return <Landing />;
 
     if (authHashBase !== 'verify-email') window.location.hash = 'verify-email';
@@ -97,6 +101,7 @@ function AppRoutes() {
     if (authHashBase === 'privacy') return <PrivacyPolicy />;
     if (authHashBase === 'verify-email') return <VerifyEmail />;
     if (authHashBase === 'pricing') return <Pricing />;
+    if (authHashBase === 'reset-password') return <ResetPassword />;
     return <Landing />;
   }
 
@@ -109,6 +114,8 @@ function AppRoutes() {
       return <VerifyEmail />;
     case 'pricing':
       return <Pricing />;
+    case 'reset-password':
+      return <ResetPassword />;
     case 'signals':
       return <Signals />;
     case 'past-signals':
