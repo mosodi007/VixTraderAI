@@ -221,6 +221,54 @@ export function Pricing() {
               )}
             </button>
 
+            {hasActiveSubscription && (
+              <button
+                onClick={async () => {
+                  setLoading(true);
+                  setError(null);
+                  try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (!session) {
+                      throw new Error('Please sign in to continue');
+                    }
+
+                    const response = await fetch(
+                      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stripe-portal`,
+                      {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${session.access_token}`,
+                        },
+                        body: JSON.stringify({
+                          return_url: `${window.location.origin}/#pricing`,
+                        }),
+                      }
+                    );
+
+                    if (!response.ok) {
+                      const errorData = await response.json();
+                      throw new Error(errorData.error || 'Failed to open billing portal');
+                    }
+
+                    const { url } = await response.json();
+                    if (url) {
+                      window.location.href = url;
+                    }
+                  } catch (err: any) {
+                    console.error('Portal error:', err);
+                    setError(err.message || 'Failed to open billing portal. Please try again.');
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+                className="w-full mt-3 py-3 px-6 rounded-lg font-medium text-base transition-all bg-slate-700 hover:bg-slate-600 text-white"
+              >
+                Manage Subscription
+              </button>
+            )}
+
             <p className="text-center text-slate-400 text-sm mt-4">
               Cancel anytime. No questions asked.
             </p>
