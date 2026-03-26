@@ -17,6 +17,7 @@ const RESEND_API = "https://api.resend.com/emails";
  *
  * Filters:
  * - User must have at least one verified *real/live* MT5 account.
+ * - User must have an active subscription (active or trialing with valid trial_ends_at).
  * - User's `profiles.ai_min_confidence_percent` must be <= the signal confidence.
  */
 export async function getSignalNotificationEmails(
@@ -38,13 +39,22 @@ export async function getSignalNotificationEmails(
 
   const { data: profiles } = await supabase
     .from("profiles")
-    .select("email,ai_min_confidence_percent,email_signals_enabled")
+    .select("email,ai_min_confidence_percent,email_signals_enabled,subscription_status,trial_ends_at")
     .in("id", userIds);
 
   return (profiles || [])
-    .filter((p: { email: string; ai_min_confidence_percent?: number | null; email_signals_enabled?: boolean | null }) => {
+    .filter((p: { email: string; ai_min_confidence_percent?: number | null; email_signals_enabled?: boolean | null; subscription_status?: string | null; trial_ends_at?: string | null }) => {
       // Email notifications are opt-in; default disabled.
       if (p.email_signals_enabled !== true) return false;
+
+      // Check subscription status - must be active or trialing with valid trial
+      const subscriptionStatus = p.subscription_status;
+      const trialEndsAt = p.trial_ends_at;
+      const isTrialing = subscriptionStatus === 'trialing' && trialEndsAt && new Date(trialEndsAt) > new Date();
+      const hasActiveSubscription = subscriptionStatus === 'active' || isTrialing;
+
+      if (!hasActiveSubscription) return false;
+
       const rawMin = p.ai_min_confidence_percent;
       const minConf = rawMin == null ? 20 : Number(rawMin);
       // Ensure legacy/invalid values can't effectively reduce the threshold below 20.

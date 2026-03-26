@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { TrendingUp, TrendingDown, Clock, Target, Shield, Activity } from 'lucide-react';
 import { SignalModal } from '../components/SignalModal';
+import { TrialExpiredBanner } from '../components/TrialExpiredBanner';
 import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 
 interface Signal {
@@ -523,6 +524,11 @@ export function Signals() {
   return (
     <ProtectedRoute>
       <DashboardLayout currentPage="signals">
+        {/* Trial Expired Banner */}
+        {!canAccessSignals && profile?.subscription_status !== 'inactive' && (
+          <TrialExpiredBanner />
+        )}
+
         <div className="max-w-7xl mx-auto space-y-6">
           <div>
             <h2 className="text-3xl font-bold text-black dark:text-white mb-2">Trading Signals</h2>
