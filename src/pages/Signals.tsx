@@ -562,7 +562,7 @@ export function Signals() {
                 <Shield className="w-8 h-8 text-emerald-500" />
               </div>
               <h3 className="text-2xl font-bold text-white mb-2">
-                {profile?.subscription_status === 'inactive' ? 'Start Your Free Trial' : 'Trial Expired'}
+                {profile?.subscription_status === 'inactive' ? 'Connect your MT5 Login' : 'Trial Expired'}
               </h3>
               <p className="text-slate-300 mb-6">
                 {profile?.subscription_status === 'inactive'
