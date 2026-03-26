@@ -9,7 +9,7 @@ export function Pricing() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hasActiveSubscription = profile?.subscription_status === 'active' || profile?.subscription_status === 'trialing';
+  const hasActiveSubscription = profile?.subscription_status === 'active';
   const isTrialing = profile?.subscription_status === 'trialing';
   const hasStartedTrial = profile?.trial_started_at !== null && profile?.trial_started_at !== undefined;
   const trialEndsAt = profile?.trial_ends_at ? new Date(profile.trial_ends_at) : null;
@@ -186,9 +186,9 @@ export function Pricing() {
                   handleSubscribe(billingInterval);
                 }
               }}
-              disabled={loading || (hasActiveSubscription && hasStartedTrial)}
+              disabled={loading || hasActiveSubscription}
               className={`w-full py-4 px-6 rounded-lg font-semibold text-lg transition-all ${
-                hasActiveSubscription && hasStartedTrial
+                hasActiveSubscription
                   ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
                   : 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white shadow-lg hover:shadow-emerald-500/25'
               }`}
@@ -202,6 +202,8 @@ export function Pricing() {
                 'Start Free Trial'
               ) : hasActiveSubscription ? (
                 'Already Subscribed'
+              ) : isTrialing ? (
+                'Upgrade Now'
               ) : (
                 `Subscribe - ${billingInterval === 'monthly' ? 'Monthly' : 'Annual'}`
               )}
