@@ -158,6 +158,21 @@ export function Settings() {
     loadDemoAndLiveAccounts();
     loadMt5Accounts();
     loadMinAiConfidence();
+
+    // Refresh profile when returning from Stripe checkout
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('session_id')) {
+      // Remove the session_id from URL
+      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+      // Force reload profile after short delay to allow webhook to process
+      setTimeout(() => {
+        if (user) {
+          supabase.auth.getSession().then(() => {
+            window.location.reload();
+          });
+        }
+      }, 2000);
+    }
   }, [user]);
 
   useEffect(() => {
