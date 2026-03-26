@@ -11,6 +11,7 @@ export function Pricing() {
 
   const hasActiveSubscription = profile?.subscription_status === 'active' || profile?.subscription_status === 'trialing';
   const isTrialing = profile?.subscription_status === 'trialing';
+  const hasStartedTrial = profile?.trial_started_at !== null && profile?.trial_started_at !== undefined;
   const trialEndsAt = profile?.trial_ends_at ? new Date(profile.trial_ends_at) : null;
   const trialDaysLeft = trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
 
@@ -178,10 +179,16 @@ export function Pricing() {
             </div>
 
             <button
-              onClick={() => handleSubscribe(billingInterval)}
-              disabled={loading || hasActiveSubscription}
+              onClick={() => {
+                if (!hasStartedTrial) {
+                  window.location.hash = 'settings';
+                } else {
+                  handleSubscribe(billingInterval);
+                }
+              }}
+              disabled={loading || (hasActiveSubscription && hasStartedTrial)}
               className={`w-full py-4 px-6 rounded-lg font-semibold text-lg transition-all ${
-                hasActiveSubscription
+                hasActiveSubscription && hasStartedTrial
                   ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
                   : 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white shadow-lg hover:shadow-emerald-500/25'
               }`}
@@ -191,10 +198,12 @@ export function Pricing() {
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                   Processing...
                 </span>
+              ) : !hasStartedTrial ? (
+                'Start Free Trial'
               ) : hasActiveSubscription ? (
                 'Already Subscribed'
               ) : (
-                `Start Free Trial - ${billingInterval === 'monthly' ? 'Monthly' : 'Annual'}`
+                `Subscribe - ${billingInterval === 'monthly' ? 'Monthly' : 'Annual'}`
               )}
             </button>
 
