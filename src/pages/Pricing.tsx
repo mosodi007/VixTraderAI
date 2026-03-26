@@ -38,8 +38,8 @@ export function Pricing() {
         ? import.meta.env.VITE_STRIPE_MONTHLY_PRICE_ID
         : import.meta.env.VITE_STRIPE_YEARLY_PRICE_ID;
 
-      if (!priceId) {
-        throw new Error('Price ID not configured. Please contact support.');
+      if (!priceId || priceId.includes('xxxxxxxxxxxxx')) {
+        throw new Error('Stripe payment configuration is incomplete. Please contact support to complete your upgrade.');
       }
 
       const response = await fetch(
@@ -61,6 +61,7 @@ export function Pricing() {
 
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('Stripe checkout error response:', errorData);
         throw new Error(errorData.error || 'Failed to create checkout session');
       }
 
