@@ -116,7 +116,7 @@ export function Dashboard() {
                       href="#settings"
                       className="inline-flex items-center gap-2 px-6 py-3 bg-white hover:bg-slate-50 text-emerald-700 font-semibold rounded-lg transition-colors shadow-lg"
                     >
-                      Connect {tradingMode === 'live' ? 'Live' : 'Demo'} MT5 & Start Trial
+                      Connect {tradingMode === 'live' ? 'Live' : 'Demo'} MT5
                     </a>
                     <a
                       href={DERIV_MT5_CREATE_URL}
