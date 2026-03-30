@@ -25,7 +25,7 @@ string ApiToken            = "";
 //--- timing
 input int    PollIntervalSeconds = 5;   // also used as snapshot interval
 input int    HttpTimeoutMs       = 5000;
-input int    MaxSignalAgeSeconds = 300;
+input int    MaxSignalAgeSeconds = 900;   // align with server default; 0 = off
 input double EntryMaxDeviationPoints = 150;
 
 //--- execution
@@ -513,6 +513,11 @@ void ExecuteInstruction(const string obj)
   ExtractNumberField(obj, "signal_age_seconds", signal_age_seconds);
   double is_retry_dispatch = 0;
   ExtractNumberField(obj, "is_retry_dispatch", is_retry_dispatch);
+  double max_signal_age_seconds = -1.0;
+  bool has_server_max_age = ExtractNumberField(obj, "max_signal_age_seconds", max_signal_age_seconds);
+  int effective_max_signal_age = MaxSignalAgeSeconds;
+  if(has_server_max_age && max_signal_age_seconds >= 0.0)
+    effective_max_signal_age = (int)MathFloor(max_signal_age_seconds + 0.5);
 
   if(!AllowNewTrades) { Log("Trades disabled. Skipping " + signal_id); return; }
   if(symbol=="" || direction=="") { Log("Invalid instruction missing symbol/direction"); return; }
@@ -536,10 +541,9 @@ void ExecuteInstruction(const string obj)
 
   double price = (direction=="BUY" ? ask : bid);
 
-  if(MaxSignalAgeSeconds > 0 && is_retry_dispatch < 0.5 && signal_age_seconds > (double)MaxSignalAgeSeconds)
+  if(effective_max_signal_age > 0 && is_retry_dispatch < 0.5 && signal_age_seconds > (double)effective_max_signal_age)
   {
-    Log("Signal too old (" + DoubleToString(signal_age_seconds,0) + "s > " + IntegerToString(MaxSignalAgeSeconds) + "s). Skipping " + signal_id);
-    MarkExecuted(signal_id);
+    Log("Signal too old (" + DoubleToString(signal_age_seconds,0) + "s > " + IntegerToString(effective_max_signal_age) + "s). Skipping (will retry when server resends) " + signal_id);
     return;
   }
 
@@ -551,8 +555,7 @@ void ExecuteInstruction(const string obj)
       double distPts = MathAbs(price - entry_price) / pt;
       if(distPts > EntryMaxDeviationPoints)
       {
-        Log("Entry vs market too far (" + DoubleToString(distPts,1) + " pts > " + DoubleToString(EntryMaxDeviationPoints,1) + "). Skipping " + signal_id);
-        MarkExecuted(signal_id);
+        Log("Entry vs market too far (" + DoubleToString(distPts,1) + " pts > " + DoubleToString(EntryMaxDeviationPoints,1) + "). Skipping (no MarkExecuted; retry later) " + signal_id);
         return;
       }
     }

@@ -84,7 +84,9 @@ export function RecentTradeActivity({ userId, tradingMode }: RecentTradeActivity
       <div className="flex items-center justify-between mb-6">
         <div>
           <h3 className="text-lg font-bold text-black dark:text-white">Recent Activity</h3>
-          <p className="text-sm text-slate-600 dark:text-slate-400">Latest opened/closed trades</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+          Latest activity. &quot;Dispatched&quot; means the server returned the instruction to the EA; MT5 opens only after the EA executes it.
+        </p>
         </div>
       </div>
 
@@ -100,10 +102,15 @@ export function RecentTradeActivity({ userId, tradingMode }: RecentTradeActivity
               const pl = Number(t.profit_loss || 0);
               const statusLower = String(t.status || '').toLowerCase();
               const statusLabel =
-                statusLower === 'sent' ? 'OPEN' :
-                statusLower === 'open' ? 'OPEN' :
-                statusLower === 'closed' ? 'CLOSED' :
-                statusLower ? statusLower.toUpperCase() : 'UNKNOWN';
+                statusLower === 'sent'
+                  ? 'DISPATCHED'
+                  : statusLower === 'open'
+                    ? 'OPEN'
+                    : statusLower === 'closed'
+                      ? 'CLOSED'
+                      : statusLower
+                        ? statusLower.toUpperCase()
+                        : 'UNKNOWN';
               return (
                 <div
                   key={t.id}

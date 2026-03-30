@@ -11,7 +11,9 @@
  */
 export const SYMBOL_POINT_SIZE: Record<string, number> = {
   R_10: 0.4,
+  R_25: 0.4,
   R_50: 0.4,
+  R_75: 0.4,
   R_100: 0.4,
   stpRNG: 0.01,
   '1HZ10V': 0.01,
@@ -29,10 +31,37 @@ export function getPointSize(symbol: string): number {
   return SYMBOL_POINT_SIZE[key] ?? 0.01;
 }
 
+/**
+ * SL/TP price levels from Deriv point config (same math as signal detector with fixed points).
+ * Used after ICT refinement so stored signals and EA instructions match symbol_sl_tp_config.
+ */
+export function priceLevelsFromPoints(
+  direction: 'BUY' | 'SELL',
+  entryPrice: number,
+  symbol: string,
+  slPoints: number,
+  tpPoints: number,
+): { stopLoss: number; tp1: number } {
+  const pt = getPointSize(symbol);
+  const slDist = Math.max(1, Number(slPoints)) * pt;
+  const tpDist = Math.max(1, Number(tpPoints)) * pt;
+  const dir = String(direction).toUpperCase();
+  if (dir === 'BUY') {
+    const stopLoss = Math.max(0.01, entryPrice - slDist);
+    const tp1 = entryPrice + tpDist;
+    return { stopLoss: parseFloat(stopLoss.toFixed(2)), tp1: parseFloat(tp1.toFixed(2)) };
+  }
+  const stopLoss = entryPrice + slDist;
+  const tp1 = Math.max(0.01, entryPrice - tpDist);
+  return { stopLoss: parseFloat(stopLoss.toFixed(2)), tp1: parseFloat(tp1.toFixed(2)) };
+}
+
 /** SL and TP in Deriv "points"; TP is always 3× SL (1:3 R:R in price). */
 export const SYMBOL_SL_TP_POINTS: Record<string, { slPoints: number; tpPoints: number }> = {
   R_10: { slPoints: 8000, tpPoints: 24000 },
+  R_25: { slPoints: 8000, tpPoints: 24000 },
   R_50: { slPoints: 8000, tpPoints: 24000 },
+  R_75: { slPoints: 8000, tpPoints: 24000 },
   R_100: { slPoints: 800, tpPoints: 2400 },
   stpRNG: { slPoints: 80, tpPoints: 240 },
   '1HZ10V': { slPoints: 800, tpPoints: 2400 },

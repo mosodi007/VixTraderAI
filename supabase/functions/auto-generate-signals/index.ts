@@ -1,11 +1,9 @@
-
-//Auto-generate-signals old
-
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { createDerivAPI } from "../_shared/deriv-api.ts";
 import { createSignalDetector } from "../_shared/advanced-signal-detector.ts";
-import { getSignalNotificationEmails, sendSignalEmail } from "../_shared/resend.ts";
+import { refineSignalWithICT } from "../_shared/ict-signal-refiner.ts";
+import { priceLevelsFromPoints } from "../_shared/symbol-sl-tp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,25 +19,13 @@ interface AutoSignalResult {
   direction?: string;
 }
 
-const SYMBOL_POINT_SIZE: Record<string, number> = {
-  R_10: 0.4,
-  R_25: 0.4,
-  R_50: 0.4,
-  R_75: 0.4,
-  R_100: 0.4,
-  stpRNG: 0.01,
-  "1HZ10V": 0.01,
-  "1HZ30V": 0.01,
-  "1HZ75V": 0.01,
-  "1HZ50V": 0.01,
-  "1HZ90V": 0.01,
-  "1HZ100V": 0.01,
-  JD25: 0.01,
-  STPIDX: 0.01,
-};
+function invertDirection(direction: "BUY" | "SELL"): "BUY" | "SELL" {
+  return direction === "BUY" ? "SELL" : "BUY";
+}
 
-function getPointSize(symbol: string): number {
-  return SYMBOL_POINT_SIZE[String(symbol || "").trim()] ?? 0.01;
+function isInvertStrategyEnabled(): boolean {
+  const raw = String(Deno.env.get("INVERT_STRATEGY") || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
 Deno.serve(async (req: Request) => {
@@ -70,33 +56,71 @@ Deno.serve(async (req: Request) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Load per-symbol SL/TP points configured from Settings page.
-    const { data: sltpConfigRows } = await supabase
-      .from("symbol_sl_tp_config")
-      .select("symbol, sl_points, tp_points");
-    const sltpBySymbol = new Map<string, { slPoints: number; tpPoints: number }>();
-    for (const row of sltpConfigRows || []) {
-      const symbol = String((row as any).symbol || "").trim();
-      if (!symbol) continue;
-      const slPoints = Math.max(1, Number((row as any).sl_points) || 0);
-      const tpPointsRaw = Number((row as any).tp_points);
-      const tpPoints = Math.max(1, Number.isFinite(tpPointsRaw) ? tpPointsRaw : slPoints * 3);
-      sltpBySymbol.set(symbol, { slPoints, tpPoints });
-    }
+    // Same Deriv codes as Settings.tsx SYMBOLS so enable/disable and lots match what we scan.
+    const symbols = [
+      'R_25', 'R_50', 'R_75', 'R_100',
+      '1HZ10V', '1HZ30V', '1HZ50V', '1HZ75V', '1HZ90V', '1HZ100V',
+      'stpRNG', 'JD25',
+    ];
+    const timeframe = 'M5';
 
-    // List of symbols to monitor
-    const symbols = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ30V', '1HZ75V', '1HZ100V'];
-    const timeframe = 'M15';
-
+    const invertStrategy = isInvertStrategyEnabled();
     const results: AutoSignalResult[] = [];
-    const generatedSignals: any[] = [];
+    const generatedSignals = [];
 
     console.log(`[AUTO-SCAN] Starting automated signal scan for ${symbols.length} symbols at ${new Date().toISOString()}`);
+    console.log(`[AUTO-SCAN] INVERT_STRATEGY=${invertStrategy ? "ON" : "OFF"}`);
+
+    // Global SL/TP source of truth: symbol_sl_tp_config
+    const { data: sltpRows, error: sltpErr } = await supabase
+      .from("symbol_sl_tp_config")
+      .select("symbol, sl_points, tp_points");
+    if (sltpErr) throw sltpErr;
+    const sltpBySymbol = new Map<string, { sl_points: number; tp_points: number }>();
+    for (const row of sltpRows || []) {
+      const symbol = String((row as any).symbol || "").trim();
+      const sl = Number((row as any).sl_points);
+      const tp = Number((row as any).tp_points);
+      if (!symbol || !Number.isFinite(sl) || !Number.isFinite(tp) || sl <= 0 || tp <= 0) continue;
+      sltpBySymbol.set(symbol, { sl_points: sl, tp_points: tp });
+    }
 
     // Process symbols in parallel for faster execution
     const symbolPromises = symbols.map(async (symbol) => {
       try {
-        // Multiple concurrent signals per symbol are allowed; outcomes are tracked per-user on `trades`.
+        // Check if symbol already has an active signal
+        const { data: existingRegistry } = await supabase
+          .from('active_signal_registry')
+          .select('*')
+          .eq('symbol', symbol)
+          .maybeSingle();
+
+        if (existingRegistry) {
+          console.log(`[${symbol}] Already has active signal. Skipping.`);
+          return {
+            symbol,
+            signalGenerated: false,
+            reason: 'Symbol already has an active signal. Waiting for current signal to close.'
+          };
+        }
+
+        // Also check signals table for active signals
+        const { data: activeSignals } = await supabase
+          .from('signals')
+          .select('id')
+          .eq('symbol', symbol)
+          .eq('is_active', true)
+          .gt('expires_at', new Date().toISOString());
+
+        if (activeSignals && activeSignals.length > 0) {
+          console.log(`[${symbol}] Has active signals in database. Skipping.`);
+          return {
+            symbol,
+            signalGenerated: false,
+            reason: 'Symbol has active signals. One signal per asset rule enforced.'
+          };
+        }
+
         // Fetch market data from Deriv
         const derivAPI = createDerivAPI();
         console.log(`[${symbol}] Fetching market data...`);
@@ -112,12 +136,26 @@ Deno.serve(async (req: Request) => {
           };
         }
 
+        const sltp = sltpBySymbol.get(symbol);
+        if (!sltp) {
+          console.warn(`[${symbol}] Missing symbol_sl_tp_config row. Skipping symbol.`);
+          return {
+            symbol,
+            signalGenerated: false,
+            reason: 'Missing symbol_sl_tp_config row (SL/TP not configured in database)'
+          };
+        }
+
         // Run advanced signal detection
         console.log(`[${symbol}] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
         console.log(`[${symbol}] 🔍 STARTING ANALYSIS with ${ticks.length} ticks...`);
         console.log(`[${symbol}] Current Price: ${ticks[ticks.length - 1].quote}`);
+        console.log(`[${symbol}] Using DB SL/TP points: SL=${sltp.sl_points}, TP=${sltp.tp_points}`);
 
-        const detector = createSignalDetector(ticks);
+        const detector = createSignalDetector(ticks, {
+          slPoints: sltp.sl_points,
+          tpPoints: sltp.tp_points,
+        });
         const detection = detector.detectSignal(symbol, timeframe);
 
         console.log(`[${symbol}] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
@@ -126,7 +164,7 @@ Deno.serve(async (req: Request) => {
         console.log(`[${symbol}] Direction: ${detection.direction || 'NONE'}`);
         console.log(`[${symbol}] Confidence: ${detection.confidence}%`);
         console.log(`[${symbol}] Triggers: ${detection.triggers.length}`);
-        console.log(`[${symbol}] Risk-Reward: 1:${detection.riskRewardRatio}`);
+        console.log(`[${symbol}] Risk-Reward: ${detection.riskRewardRatio}:1`);
 
         if (detection.triggers.length > 0) {
           console.log(`[${symbol}] 📈 INDICATOR TRIGGERS:`);
@@ -143,9 +181,13 @@ Deno.serve(async (req: Request) => {
         }
 
         if (detection.shouldGenerateSignal && detection.direction) {
+          const finalDirectionPreview = invertStrategy ? invertDirection(detection.direction) : detection.direction;
           console.log(`[${symbol}] 💰 TRADE SETUP:`);
+          console.log(`[${symbol}]   Direction (raw): ${detection.direction} -> (final): ${finalDirectionPreview}`);
           console.log(`[${symbol}]   Entry: ${detection.entryPrice}`);
-          console.log(`[${symbol}]   TP: ${detection.takeProfit}`);
+          console.log(`[${symbol}]   TP1: ${detection.tp1}`);
+          console.log(`[${symbol}]   TP2: ${detection.tp2}`);
+          console.log(`[${symbol}]   TP3: ${detection.tp3}`);
           console.log(`[${symbol}]   SL: ${detection.stopLoss}`);
         } else {
           console.log(`[${symbol}] ⚠️ REASON: ${detection.reasoning.split('\n')[0]}`);
@@ -161,35 +203,86 @@ Deno.serve(async (req: Request) => {
           };
         }
 
-        // Get MT5 symbol mapping
-        const mt5Symbol = derivAPI.getMT5Symbol(symbol);
-        const currentPrice = detection.entryPrice;
+        const finalDirection = invertStrategy ? invertDirection(detection.direction) : detection.direction;
+
+        // Liquidity levels from recent price range (ICT: avoid placing SL where liquidity sits)
+        const prices = ticks.map((t: { quote: number }) => t.quote);
+        const recentPrices = prices.slice(-Math.min(80, prices.length));
+        const recentSwingHigh = recentPrices.length ? Math.max(...recentPrices) : detection.entryPrice;
+        const recentSwingLow = recentPrices.length ? Math.min(...recentPrices) : detection.entryPrice;
+
+        // ICT refinement: OpenAI acts as expert ICT trader (best-effort; never blocks signal creation)
+        let entryPrice = detection.entryPrice;
         let stopLoss = detection.stopLoss;
-        let takeProfit = detection.takeProfit;
+        let takeProfit = detection.takeProfit ?? 0;
+        let tp1 = detection.tp1 ?? detection.takeProfit ?? 0;
+        let tp2 = detection.tp2 ?? tp1;
+        let tp3 = detection.tp3 ?? detection.takeProfit ?? tp1;
+        let marketContext = detection.reasoning;
+        let ictResult: { refined: { entry_price: number; stop_loss: number; tp1: number; tp2: number; tp3: number }; reasoning: string } | null = null;
+        try {
+          ictResult = await refineSignalWithICT(openaiApiKey, {
+            symbol,
+            direction: finalDirection,
+            currentPrice: detection.entryPrice,
+            atr: detection.atr ?? Math.abs(detection.entryPrice - detection.stopLoss) / 2,
+            supportLevels: detection.supportLevels ?? [],
+            resistanceLevels: detection.resistanceLevels ?? [],
+            manipulation_high: recentSwingHigh,
+            manipulation_low: recentSwingLow,
+            initialEntry: detection.entryPrice,
+            initialStopLoss: detection.stopLoss,
+            initialTp1: detection.tp1 ?? detection.takeProfit ?? 0,
+            initialTp2: detection.tp2 ?? detection.tp1 ?? detection.takeProfit ?? 0,
+            initialTp3: detection.tp3 ?? detection.takeProfit ?? 0,
+            triggerSummary: detection.triggers.map((t) => t.triggerCondition).join('; '),
+          });
+        } catch (ictErr: unknown) {
+          console.warn(`[${symbol}] ICT refiner failed (using detector levels):`, ictErr instanceof Error ? ictErr.message : ictErr);
+        }
 
-        // If Settings has symbol points, override detector SL/TP with configured distances.
-        const configured = sltpBySymbol.get(symbol);
-        if (configured) {
-          const pointSize = getPointSize(symbol);
-          const slDistance = configured.slPoints * pointSize;
-          const tpDistance = configured.tpPoints * pointSize;
+        if (ictResult) {
+          entryPrice = ictResult.refined.entry_price;
+          stopLoss = ictResult.refined.stop_loss;
+          tp1 = ictResult.refined.tp1;
+          tp2 = ictResult.refined.tp2;
+          tp3 = ictResult.refined.tp3;
+          takeProfit = tp3;
+          marketContext = `${detection.reasoning}\n\n[ICT Refinement] ${ictResult.reasoning}`;
+          console.log(`[${symbol}] 🎯 ICT refined: Entry ${entryPrice}, SL ${stopLoss}, TP1 ${tp1}`);
+        }
 
-          if (detection.direction === "BUY") {
-            stopLoss = currentPrice - slDistance;
-            takeProfit = currentPrice + tpDistance;
-          } else {
-            stopLoss = currentPrice + slDistance;
-            takeProfit = currentPrice - tpDistance;
-          }
-
+        // Source of truth for distances: symbol_sl_tp_config (ICT may move levels; EA must match DB).
+        if (entryPrice > 0) {
+          const dbLv = priceLevelsFromPoints(
+            finalDirection,
+            entryPrice,
+            symbol,
+            sltp.sl_points,
+            sltp.tp_points,
+          );
+          stopLoss = dbLv.stopLoss;
+          tp1 = dbLv.tp1;
+          tp2 = dbLv.tp1;
+          tp3 = dbLv.tp1;
+          takeProfit = dbLv.tp1;
           console.log(
-            `[${symbol}] Applied settings SL/TP points: SL=${configured.slPoints}, TP=${configured.tpPoints} (pointSize=${pointSize})`
+            `[${symbol}] SL/TP snapped to DB points (SL=${sltp.sl_points}, TP=${sltp.tp_points}): SL ${stopLoss}, TP ${tp1}`,
           );
         }
 
-        // Calculate expiry (4 hours for M15 timeframe)
+        // Get MT5 symbol mapping
+        const mt5Symbol = derivAPI.getMT5Symbol(symbol);
+        const currentPrice = entryPrice;
+
+        // Calculate expiry (1 hour for M1 timeframe)
         const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + 4);
+        expiresAt.setHours(expiresAt.getHours() + 1);
+
+        const slDistAbs = Math.abs(currentPrice - stopLoss);
+        const tpDistAbs = Math.abs(tp1 - currentPrice);
+        const rawRr = slDistAbs > 1e-10 ? tpDistAbs / slDistAbs : detection.riskRewardRatio;
+        const riskRewardRatio = Number.isFinite(rawRr) ? Math.min(1e9, Math.max(0, rawRr)) : detection.riskRewardRatio;
 
         // Create signal in database
         const { data: newSignal, error: insertError } = await supabase
@@ -197,24 +290,30 @@ Deno.serve(async (req: Request) => {
           .insert({
             symbol: symbol,
             mt5_symbol: mt5Symbol,
-            direction: detection.direction,
+            direction: finalDirection,
             entry_price: currentPrice,
             stop_loss: stopLoss,
             take_profit: takeProfit,
-            tp1: null,
-            tp2: null,
-            tp3: null,
+            tp1,
+            tp2,
+            tp3,
             pip_stop_loss: Math.abs(currentPrice - stopLoss),
-            pip_take_profit: Math.abs(takeProfit - currentPrice),
-            risk_reward_ratio: detection.riskRewardRatio,
+            pip_take_profit: Math.abs(tp1 - currentPrice),
+            risk_reward_ratio: riskRewardRatio,
             timeframe: timeframe,
             confidence: detection.confidence,
             confidence_percentage: detection.confidence,
-            signal_type: 'INDICATOR_BASED',
+            signal_type: ictResult
+              ? (invertStrategy ? 'ICT_REFINED_DIRECTION' : 'ICT_REFINED')
+              : (invertStrategy ? 'INDICATOR_BASED_DIRECTION' : 'INDICATOR_BASED'),
             signal_status: 'ACTIVE',
             trigger_count: detection.triggers.length,
-            market_context: detection.reasoning,
-            reasoning: detection.reasoning,
+            market_context: invertStrategy
+              ? `[Direction Inversion] Raw: ${detection.direction}, Final: ${finalDirection}\n\n${marketContext}`
+              : marketContext,
+            reasoning: invertStrategy
+              ? `[Direction Inversion] Raw: ${detection.direction}, Final: ${finalDirection}\n\n${marketContext}`
+              : marketContext,
             technical_indicators: {
               triggers: detection.triggers,
               patterns: detection.patterns
@@ -231,7 +330,7 @@ Deno.serve(async (req: Request) => {
           throw insertError;
         }
 
-        console.log(`[${symbol}] ✓ Signal created: ${detection.direction} at ${currentPrice} (ID: ${newSignal.id})`);
+        console.log(`[${symbol}] ✓ Signal created: ${detection.direction} at ${currentPrice} (ID: ${newSignal.id})${ictResult ? ' [ICT refined]' : ''}`);
 
         // Register in active signal registry
         await supabase.rpc('register_active_signal', {
@@ -255,31 +354,6 @@ Deno.serve(async (req: Request) => {
             .insert(triggerRecords);
 
           console.log(`[${symbol}] Recorded ${detection.triggers.length} trigger conditions`);
-        }
-
-        // Send signal notification email via Resend
-        try {
-          const signalConfidence = Number((newSignal as any)?.confidence_percentage ?? (newSignal as any)?.confidence ?? detection.confidence ?? 0);
-          const emails = await getSignalNotificationEmails(supabase, signalConfidence);
-          if (emails.length > 0) {
-            const payload = {
-              id: newSignal.id,
-              symbol,
-              mt5_symbol: mt5Symbol,
-              direction: detection.direction,
-              entry_price: currentPrice,
-              stop_loss: stopLoss,
-              take_profit: takeProfit,
-              tp1: null,
-              risk_reward_ratio: detection.riskRewardRatio,
-              created_at: new Date().toISOString(),
-            };
-            const emailResult = await sendSignalEmail({ signal: payload, to: emails });
-            if (emailResult.error) console.warn(`[${symbol}] Resend email failed:`, emailResult.error);
-            else console.log(`[${symbol}] Signal email sent to ${emails.length} recipient(s)`);
-          }
-        } catch (emailError) {
-          console.warn(`[${symbol}] Resend signal email error:`, emailError instanceof Error ? emailError.message : emailError);
         }
 
         generatedSignals.push(newSignal);
@@ -319,7 +393,7 @@ Deno.serve(async (req: Request) => {
       .eq('id', '00000000-0000-0000-0000-000000000001')
       .single();
 
-    const scanIntervalMinutes = scheduleData?.scan_interval_minutes || 5;
+    const scanIntervalMinutes = scheduleData?.scan_interval_minutes || 1;
     const nextScanTime = new Date();
     nextScanTime.setMinutes(nextScanTime.getMinutes() + scanIntervalMinutes);
 
@@ -372,3 +446,4 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+

@@ -25,6 +25,20 @@ interface Trade {
   closed_at: string | null;
 }
 
+function tradeStatusLabel(status: string): string {
+  const s = String(status || '').toLowerCase();
+  if (s === 'sent') return 'dispatched';
+  return s || 'unknown';
+}
+
+function tradeStatusBadgeClass(status: string): string {
+  const s = String(status || '').toLowerCase();
+  if (s === 'open') return 'bg-blue-500/20 text-blue-400';
+  if (s === 'closed') return 'bg-slate-500/20 text-slate-600 dark:text-slate-400';
+  if (s === 'sent') return 'bg-amber-500/20 text-amber-600 dark:text-amber-300';
+  return 'bg-yellow-500/20 text-yellow-400';
+}
+
 export function Performance() {
   const { user, tradingMode } = useAuth();
   const [stats, setStats] = useState<TradeStats>({
@@ -183,7 +197,10 @@ export function Performance() {
               </div>
 
               <div className="bg-slate-50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl p-6">
-                <h3 className="text-xl font-bold text-black dark:text-white mb-6">Recent Trades</h3>
+                <h3 className="text-xl font-bold text-black dark:text-white mb-2">Recent Trades</h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
+                  &quot;Dispatched&quot; means the instruction was returned to your EA on a poll — MT5 only opens after the EA runs the order. If it stays dispatched, check the EA Experts log (age filter, symbol name, AutoTrading).
+                </p>
                 {trades.length === 0 ? (
                   <div className="text-center py-12">
                     <div className="w-16 h-16 bg-slate-200 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -236,14 +253,15 @@ export function Performance() {
                               </span>
                             </td>
                             <td className="py-4 px-4">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                trade.status === 'open'
-                                  ? 'bg-blue-500/20 text-blue-400'
-                                  : trade.status === 'closed'
-                                  ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400'
-                                  : 'bg-yellow-500/20 text-yellow-400'
-                              }`}>
-                                {trade.status}
+                              <span
+                                className={`px-2 py-1 rounded-full text-xs font-medium ${tradeStatusBadgeClass(trade.status)}`}
+                                title={
+                                  String(trade.status).toLowerCase() === 'sent'
+                                    ? 'Backend queued this for the EA; not yet an MT5 position'
+                                    : undefined
+                                }
+                              >
+                                {tradeStatusLabel(trade.status)}
                               </span>
                             </td>
                             <td className="py-4 px-4 text-slate-600 dark:text-slate-400 text-sm">

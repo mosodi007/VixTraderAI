@@ -196,6 +196,20 @@ Deno.serve(async (req: Request) => {
           }
 
           if (updatedRows && updatedRows.length > 0) {
+            // Global shared-signal lifecycle: close the signal once TP/SL is confirmed.
+            const { error: signalOutcomeErr } = await supabase.rpc("update_signal_outcome", {
+              p_signal_id: signalId,
+              p_outcome: outcome,
+              p_close_price: currentPrice,
+              p_profit_loss: profitLoss ?? 0,
+            });
+            if (signalOutcomeErr) {
+              console.warn(
+                `[${derivSymbol}] update_signal_outcome failed for signal ${signalId}:`,
+                signalOutcomeErr.message,
+              );
+            }
+
             tradesClosedCount++;
             results.push({
               trade_id: tradeId,

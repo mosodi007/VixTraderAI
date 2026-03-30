@@ -312,6 +312,21 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    const { data: globalSltpRows, error: globalSltpErr } = await supabase
+      .from("symbol_sl_tp_config")
+      .select("symbol, sl_points, tp_points");
+    if (globalSltpErr) {
+      console.warn("[mt5-get-instructions] symbol_sl_tp_config load failed:", globalSltpErr.message);
+    }
+    const globalSltpBySymbol = new Map<string, { sl_points: number; tp_points: number }>();
+    for (const r of globalSltpRows || []) {
+      const sym = String((r as any).symbol || "").trim();
+      const sl = Number((r as any).sl_points);
+      const tp = Number((r as any).tp_points);
+      if (!sym || !Number.isFinite(sl) || !Number.isFinite(tp) || sl <= 0 || tp <= 0) continue;
+      globalSltpBySymbol.set(sym, { sl_points: sl, tp_points: tp });
+    }
+
     // Get already-executed signal_ids for this account.
     // We only treat signals as executed once the trade is actually "open" or "closed".
     const { data: executedTrades, error: trErr } = await supabase
@@ -326,11 +341,13 @@ Deno.serve(async (req: Request) => {
     if (trErr) throw trErr;
     const executed = new Set((executedTrades || []).map((t: any) => String(t.signal_id)));
 
-    // One in-flight trade per Deriv symbol per MT5 account: sent/open on a symbol blocks other
-    // signals for that symbol only; other symbols can still receive instructions.
+    // One in-flight trade per Deriv symbol: blocks other signals for that symbol.
+    // Important: a stale `sent` row for a signal that is no longer ACTIVE must NOT block
+    // newer signals (otherwise the EA never picks up the new instruction after rotation/expiry).
+    // `open` always blocks until the position is closed.
     const { data: inFlightTrades, error: ifErr } = await supabase
       .from("trades")
-      .select("signal_id")
+      .select("signal_id, status")
       .eq("mt5_login", mt5_loginStored)
       .in("status", ["sent", "open"])
       .not("signal_id", "is", null);
@@ -339,23 +356,40 @@ Deno.serve(async (req: Request) => {
     const inFlightIds = [...new Set((inFlightTrades || []).map((t: any) => String(t.signal_id)))];
     const inFlightBySymbol = new Map<string, string>();
     if (inFlightIds.length > 0) {
-      const { data: symRows, error: symErr } = await supabase
+      const { data: inflightSigRows, error: inflightSigErr } = await supabase
         .from("signals")
-        .select("id, symbol")
+        .select("id, symbol, is_active, signal_status")
         .in("id", inFlightIds);
-      if (symErr) throw symErr;
-      for (const row of symRows || []) {
-        const sym = String((row as any).symbol || "").trim();
+      if (inflightSigErr) throw inflightSigErr;
+      const signalBlockingMeta = new Map<string, { symbol: string; stillActive: boolean }>();
+      for (const row of inflightSigRows || []) {
         const sid = String((row as any).id);
-        if (sym) inFlightBySymbol.set(sym, sid);
+        const sym = String((row as any).symbol || "").trim();
+        const stillActive =
+          (row as any).is_active === true && String((row as any).signal_status || "").toUpperCase() === "ACTIVE";
+        if (sid) signalBlockingMeta.set(sid, { symbol: sym, stillActive });
+      }
+      for (const t of inFlightTrades || []) {
+        const sid = String((t as any).signal_id || "");
+        const st = String((t as any).status || "").toLowerCase();
+        if (!sid) continue;
+        const meta = signalBlockingMeta.get(sid);
+        const sym = meta?.symbol?.trim() || "";
+        if (!sym) continue;
+        if (st === "open") {
+          inFlightBySymbol.set(sym, sid);
+        } else if (st === "sent" && meta?.stillActive) {
+          inFlightBySymbol.set(sym, sid);
+        }
       }
     }
     const dispatchRetrySeconds = Math.max(15, Number(Deno.env.get("DISPATCH_RETRY_SECONDS") || 120));
     // Skip stale ACTIVE signals on first dispatch (new EA / new account): avoids opening far from entry.
     // Retries when a "sent" row already exist are still allowed. Set to 0 to disable.
+    // Default 900s: slow EA poll intervals often missed the old 300s window and never got a first dispatch.
     const rawMaxAge = Deno.env.get("SIGNAL_INSTRUCTION_MAX_AGE_SECONDS");
     const maxSignalAgeSec =
-      rawMaxAge === "" || rawMaxAge == null ? 300 : Number(rawMaxAge);
+      rawMaxAge === "" || rawMaxAge == null ? 900 : Number(rawMaxAge);
 
     const instructions: any[] = [];
     const skippedByReason: Record<string, number> = {};
@@ -408,10 +442,23 @@ Deno.serve(async (req: Request) => {
       const entryPrice = Number(s.entry_price) || 0;
       const userSlPts = settings?.sl_points;
       const userTpPts = settings?.tp_points;
-      if (userSlPts != null && Number(userSlPts) > 0 && entryPrice > 0) {
-        const slPoints = Math.max(1, Number(userSlPts));
+      const globalCfg = globalSltpBySymbol.get(symbolCode);
+      const effectiveSlPts =
+        userSlPts != null && Number(userSlPts) > 0
+          ? Number(userSlPts)
+          : globalCfg != null
+            ? globalCfg.sl_points
+            : null;
+      const effectiveTpPts =
+        userTpPts != null && Number(userTpPts) > 0
+          ? Number(userTpPts)
+          : globalCfg != null
+            ? globalCfg.tp_points
+            : null;
+      if (effectiveSlPts != null && effectiveSlPts > 0 && entryPrice > 0) {
+        const slPoints = Math.max(1, effectiveSlPts);
         const tpPoints =
-          userTpPts != null && Number(userTpPts) > 0 ? Math.max(1, Number(userTpPts)) : slPoints * 3;
+          effectiveTpPts != null && effectiveTpPts > 0 ? Math.max(1, effectiveTpPts) : slPoints * 3;
         const pointSize = getPointSize(symbolCode);
         const slDist = slPoints * pointSize;
         const tpDist = tpPoints * pointSize;
@@ -551,6 +598,8 @@ Deno.serve(async (req: Request) => {
         signal_created_at: (s as any).created_at ?? null,
         signal_age_seconds: Math.floor(signalAgeSec),
         is_retry_dispatch: sentRow ? 1 : 0,
+        // EA uses this to match server first-dispatch window (see MaxSignalAgeSeconds in .mq5)
+        max_signal_age_seconds: maxSignalAgeSec,
       });
       symbolsDispatchedThisPoll.add(symbolCode);
       if (instructions.length >= max) break;

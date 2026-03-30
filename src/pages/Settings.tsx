@@ -8,7 +8,7 @@ import { DERIV_MT5_CREATE_URL } from '../constants/deriv';
 import { DemoAccountApprovedModal } from '../components/DemoAccountApprovedModal';
 
 // Keep in sync with `supabase/functions/auto-generate-signals/index.ts` monitored symbols.
-const SYMBOLS = ['R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ30V', '1HZ75V', '1HZ100V'] as const;
+const SYMBOLS = ['R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ30V', '1HZ75V', '1HZ90V', '1HZ100V', 'stpRNG', 'JD25'] as const;
 
 const SYMBOL_NAMES: Record<(typeof SYMBOLS)[number], string> = {
   'R_25': 'Volatility 25 Index',
@@ -18,7 +18,10 @@ const SYMBOL_NAMES: Record<(typeof SYMBOLS)[number], string> = {
   '1HZ10V': 'Volatility 10 (1s) Index',
   '1HZ30V': 'Volatility 30 (1s) Index',
   '1HZ75V': 'Volatility 75 (1s) Index',
+  '1HZ90V': 'Volatility 90 (1s) Index',
   '1HZ100V': 'Volatility 100 (1s) Index',
+  stpRNG: 'Step Index',
+  JD25: 'Jump 25 Index',
 };
 
 // Per-symbol lot constraints (Deriv MT5). EA still enforces broker min/max/step at execution time.
@@ -30,7 +33,10 @@ const SYMBOL_MIN_LOT: Record<(typeof SYMBOLS)[number], number> = {
   '1HZ10V': 0.5,
   '1HZ30V': 0.2,
   '1HZ75V': 0.05,
+  '1HZ90V': 0.01,
   '1HZ100V': 1,
+  stpRNG: 0.1,
+  JD25: 0.01,
 };
 
 const SYMBOL_MAX_LOT: Record<(typeof SYMBOLS)[number], number> = {
@@ -41,7 +47,10 @@ const SYMBOL_MAX_LOT: Record<(typeof SYMBOLS)[number], number> = {
   '1HZ10V': 400,
   '1HZ30V': 120,
   '1HZ75V': 80,
+  '1HZ90V': 100000,
   '1HZ100V': 330,
+  stpRNG: 100,
+  JD25: 2,
 };
 
 const SYMBOL_LOT_STEP: Record<(typeof SYMBOLS)[number], number> = {
@@ -52,7 +61,10 @@ const SYMBOL_LOT_STEP: Record<(typeof SYMBOLS)[number], number> = {
   '1HZ10V': 0.01,
   '1HZ30V': 0.01,
   '1HZ75V': 0.01,
+  '1HZ90V': 0.01,
   '1HZ100V': 0.01,
+  stpRNG: 0.01,
+  JD25: 0.01,
 };
 
 /** Maps UI account type to Deriv MT5 server (required for verification API). */
@@ -446,36 +458,20 @@ export function Settings() {
         return;
       }
       for (const symbol of symbolsShownForSlTp) {
-        const s = symbolTradeSettings[symbol] ?? { tradeEnabled: true, lotMode: 'fixed' as LotMode, fixedLot: 0.01, percent: 0 };
-        const trade_enabled = !!s.tradeEnabled;
-        const lot_mode: LotMode = s.lotMode === 'percent_balance' ? 'percent_balance' : 'fixed';
-        const minLot = SYMBOL_MIN_LOT[symbol] ?? 0;
-        const maxLot = SYMBOL_MAX_LOT[symbol] ?? Number.POSITIVE_INFINITY;
-        const step = SYMBOL_LOT_STEP[symbol] ?? 0.01;
-        const decimals = step === 0.001 ? 3 : 2;
-        const factor = Math.pow(10, decimals);
-        const fixed_lot_raw = Math.round(Math.max(0, Number(s.fixedLot) || 0) * factor) / factor;
-        const fixed_lot = Math.min(maxLot, Math.max(minLot, fixed_lot_raw));
-        const percent = Math.round(Math.max(0, Math.min(100, Number(s.percent) || 0)) * 100) / 100;
-
         const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 400, tpPoints: 1200 };
         const sl = Math.max(1, Math.round(Number(pts.slPoints)) || 400);
         const tp = sl * 3;
 
-        const { error } = await supabase.from('mt5_symbol_settings').upsert(
+        // Schema enforces "global SL/TP only" via mt5_symbol_settings_global_sl_tp_only_check,
+        // so we must store SL/TP points in symbol_sl_tp_config (global) instead of mt5_symbol_settings.
+        const { error } = await supabase.from('symbol_sl_tp_config').upsert(
           {
-            user_id: user.id,
-            mt5_login: selectedMt5Login,
             symbol,
-            trade_enabled,
-            lot_mode,
-            fixed_lot: fixed_lot || 0,
-            percent: lot_mode === 'percent_balance' ? percent : 0,
             sl_points: sl,
             tp_points: tp,
             updated_at: new Date().toISOString(),
           },
-          { onConflict: 'user_id,mt5_login,symbol' },
+          { onConflict: 'symbol' },
         );
 
         if (error) throw error;
@@ -483,7 +479,7 @@ export function Settings() {
 
       setPointsMessage({
         type: 'success',
-        text: 'SL/TP points saved for this MT5 account. TP follows 3× SL (1:3 R:R). The EA uses your settings when dispatching trades.',
+        text: 'Global SL/TP points saved (applies to all accounts). TP follows 3× SL (1:3 R:R). New signals/EA dispatches will use these distances.',
       });
     } catch (error: any) {
       setPointsMessage({ type: 'error', text: error.message || 'Failed to save symbol points' });
@@ -520,10 +516,6 @@ export function Settings() {
         const fixed_lot = Math.min(maxLot, Math.max(minLot, fixed_lot_raw));
         const percent = Math.round(Math.max(0, Math.min(100, Number(s.percent) || 0)) * 100) / 100;
 
-        const pts = symbolPoints[symbol] ?? DEFAULT_POINTS[symbol] ?? { slPoints: 400, tpPoints: 1200 };
-        const slPts = Math.max(1, Math.round(Number(pts.slPoints)) || 400);
-        const tpPts = slPts * 3;
-
         const { error } = await supabase
           .from('mt5_symbol_settings')
           .upsert(
@@ -535,8 +527,9 @@ export function Settings() {
               lot_mode,
               fixed_lot: fixed_lot || 0,
               percent: lot_mode === 'percent_balance' ? percent : 0,
-              sl_points: slPts,
-              tp_points: tpPts,
+              // Schema enforces "global SL/TP only" for mt5_symbol_settings, so these must always be NULL.
+              sl_points: null,
+              tp_points: null,
               updated_at: new Date().toISOString(),
             },
             { onConflict: 'user_id,mt5_login,symbol' }
