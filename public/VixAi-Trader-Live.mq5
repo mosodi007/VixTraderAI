@@ -617,7 +617,7 @@ void PollBackend()
   string body  = "{"
     "\"mt5_login\":\""+login+"\","
     "\"ea_mode\":\"live\","
-    "\"max\":5"
+    "\"max\":1000"
   "}";
 
   string resp; int st;

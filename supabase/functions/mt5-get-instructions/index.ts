@@ -178,7 +178,16 @@ Deno.serve(async (req: Request) => {
 
     const mt5_loginRaw = body.mt5_login;
     const mt5_login = String(mt5_loginRaw != null ? mt5_loginRaw : "").trim();
-    const max = Math.max(1, Math.min(20, Number(body.max) || 5));
+    const requestedMax = Number((body as any).max);
+    const defaultMax = Math.max(10, Number(Deno.env.get("EA_INSTRUCTIONS_DEFAULT_MAX") || 100));
+    // Allow larger fan-out per poll; EA can still pass a smaller explicit max if desired.
+    const max = Math.max(
+      1,
+      Math.min(
+        1000,
+        Number.isFinite(requestedMax) && requestedMax > 0 ? Math.floor(requestedMax) : defaultMax,
+      ),
+    );
     const ea_mode = toEaMode((body as any).ea_mode);
 
     if (!mt5_login) {
@@ -327,33 +336,41 @@ Deno.serve(async (req: Request) => {
       globalSltpBySymbol.set(sym, { sl_points: sl, tp_points: tp });
     }
 
-    // Get already-executed signal_ids for this account.
-    // We only treat signals as executed once the trade is actually "open" or "closed".
-    const { data: executedTrades, error: trErr } = await supabase
-      .from("trades")
-      .select("signal_id,status")
-      .eq("mt5_login", mt5_loginStored)
-      .not("signal_id", "is", null)
-      .in("status", ["open", "closed"])
-      .order("created_at", { ascending: false })
-      .limit(500);
-
-    if (trErr) throw trErr;
-    const executed = new Set((executedTrades || []).map((t: any) => String(t.signal_id)));
+    // Batch-load trade rows for this account and active signals in ONE query
+    // (avoids N-per-signal roundtrips, critical when many MT5s poll at once).
+    const signalIds = [...new Set((sigList || []).map((s: any) => String((s as any).id || "")).filter(Boolean))];
+    const rowsBySignal = new Map<string, any[]>();
+    const executed = new Set<string>();
+    let inFlightTrades: any[] = [];
+    let inFlightIds: string[] = [];
+    if (signalIds.length > 0) {
+      const { data: tradeRows, error: tradeRowsErr } = await supabase
+        .from("trades")
+        .select("id,signal_id,status,created_at,opened_at")
+        .eq("mt5_login", mt5_loginStored)
+        .in("signal_id", signalIds)
+        .order("created_at", { ascending: false });
+      if (tradeRowsErr) throw tradeRowsErr;
+      for (const r of tradeRows || []) {
+        const sid = String((r as any).signal_id || "");
+        if (!sid) continue;
+        const arr = rowsBySignal.get(sid) || [];
+        arr.push(r);
+        rowsBySignal.set(sid, arr);
+        const st = String((r as any).status || "").toLowerCase();
+        if (st === "open" || st === "closed") executed.add(sid);
+      }
+      inFlightTrades = (tradeRows || []).filter((r: any) => {
+        const st = String((r as any).status || "").toLowerCase();
+        return st === "sent" || st === "open";
+      });
+      inFlightIds = [...new Set(inFlightTrades.map((t: any) => String(t.signal_id || "")).filter(Boolean))];
+    }
 
     // One in-flight trade per Deriv symbol: blocks other signals for that symbol.
     // Important: a stale `sent` row for a signal that is no longer ACTIVE must NOT block
     // newer signals (otherwise the EA never picks up the new instruction after rotation/expiry).
     // `open` always blocks until the position is closed.
-    const { data: inFlightTrades, error: ifErr } = await supabase
-      .from("trades")
-      .select("signal_id, status")
-      .eq("mt5_login", mt5_loginStored)
-      .in("status", ["sent", "open"])
-      .not("signal_id", "is", null);
-
-    if (ifErr) throw ifErr;
-    const inFlightIds = [...new Set((inFlightTrades || []).map((t: any) => String(t.signal_id)))];
     const inFlightBySymbol = new Map<string, string>();
     if (inFlightIds.length > 0) {
       const { data: inflightSigRows, error: inflightSigErr } = await supabase
@@ -494,18 +511,7 @@ Deno.serve(async (req: Request) => {
       // Dispatch lock: avoid duplicate "sent" rows on repeated EA polls.
       // Retry a "sent" dispatch only after DISPATCH_RETRY_SECONDS.
       const nowIso = new Date().toISOString();
-      const { data: recentRows, error: recentErr } = await supabase
-        .from("trades")
-        .select("id,status,created_at,opened_at")
-        .eq("mt5_login", mt5_loginStored)
-        .eq("signal_id", id)
-        .order("created_at", { ascending: false })
-        .limit(10);
-      if (recentErr) {
-        console.warn("[mt5-get-instructions] dispatch precheck failed:", recentErr.message);
-      }
-
-      const rows = recentRows || [];
+      const rows = rowsBySignal.get(id) || [];
       const hasExecutedRow = rows.some((r: any) => ["open", "closed"].includes(String(r.status || "")));
       if (hasExecutedRow) {
         executed.add(id);
@@ -576,6 +582,10 @@ Deno.serve(async (req: Request) => {
         recordSkip("dispatch_write_failed", id, symbolCode);
         continue;
       }
+      // Keep in-memory view aligned for this request lifecycle.
+      const localRows = rowsBySignal.get(id) || [];
+      localRows.unshift({ id: sentRow?.id || null, status: "sent", opened_at: nowIso, created_at: nowIso });
+      rowsBySignal.set(id, localRows);
 
       instructions.push({
         signal_id: id,

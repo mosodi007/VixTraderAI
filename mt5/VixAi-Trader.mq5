@@ -551,7 +551,7 @@ void PollBackend()
   string login = IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN));
   string body  = "{"
     "\"mt5_login\":\""+login+"\","
-    "\"max\":5"
+    "\"max\":1000"
   "}";
 
   string resp; int st;
