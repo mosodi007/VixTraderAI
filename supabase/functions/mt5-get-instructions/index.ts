@@ -214,6 +214,7 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({
           success: false,
           error: "Unauthorized Account: Go to https://vixai.trade to add this account",
+          requested_mt5_login: mt5_login,
         }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
