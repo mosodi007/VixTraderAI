@@ -23,7 +23,8 @@ string ApiUrlReportPos     = "https://qqkhcvkodbogjsbichrw.supabase.co/functions
 string ApiToken            = "";
 
 //--- timing
-input int    PollIntervalSeconds = 5;   // also used as snapshot interval
+input int    PollIntervalSeconds = 20;  // instructions polling cadence
+input int    SnapshotIntervalSeconds = 60; // account/positions telemetry cadence
 input int    HttpTimeoutMs       = 5000;
 input int    MaxSignalAgeSeconds = 900;   // align with server default; 0 = off
 input double EntryMaxDeviationPoints = 150;
@@ -673,8 +674,13 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
   PollBackend();
-  PushAccountSnapshot();
-  PushPositionsSnapshot();
+  static datetime s_lastSnapshot = 0;
+  if(s_lastSnapshot == 0 || (TimeCurrent() - s_lastSnapshot) >= SnapshotIntervalSeconds)
+  {
+    PushAccountSnapshot();
+    PushPositionsSnapshot();
+    s_lastSnapshot = TimeCurrent();
+  }
 }
 
 void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest &request, const MqlTradeResult &result)

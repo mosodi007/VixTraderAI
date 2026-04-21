@@ -17,7 +17,8 @@ input string ApiUrlReportPos     = "https://qqkhcvkodbogjsbichrw.supabase.co/fun
 input string ApiToken            = "";
 
 //--- timing
-input int    PollIntervalSeconds = 5;   // also used as snapshot interval
+input int    PollIntervalSeconds = 20;  // instructions polling cadence
+input int    SnapshotIntervalSeconds = 60; // account/positions telemetry cadence
 input int    HttpTimeoutMs       = 5000;
 
 //--- execution
@@ -612,9 +613,14 @@ void OnTimer()
   if(gUnauthorized) return;
   // 1) Pull instructions
   PollBackend();
-  // 2) Push realtime snapshots
-  PushAccountSnapshot();
-  PushPositionsSnapshot();
+  // 2) Push snapshots on slower cadence to reduce edge invocations
+  static datetime s_lastSnapshot = 0;
+  if(s_lastSnapshot == 0 || (TimeCurrent() - s_lastSnapshot) >= SnapshotIntervalSeconds)
+  {
+    PushAccountSnapshot();
+    PushPositionsSnapshot();
+    s_lastSnapshot = TimeCurrent();
+  }
 }
 
 // Capture closes (realized P/L) and report to backend

@@ -58,9 +58,7 @@ Deno.serve(async (req: Request) => {
 
     // Same Deriv codes as Settings.tsx SYMBOLS so enable/disable and lots match what we scan.
     const symbols = [
-      'R_25', 'R_50', 'R_75', 'R_100',
-      '1HZ10V', '1HZ30V', '1HZ50V', '1HZ75V', '1HZ90V', '1HZ100V',
-      'stpRNG', 'JD25',
+      'R_100',
     ];
     const timeframe = 'M5';
 

@@ -97,6 +97,12 @@ function toMillis(v: string | null | undefined): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+function envEnabled(name: string, fallback: boolean = false): boolean {
+  const raw = String(Deno.env.get(name) ?? "").trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
 type EaMode = "demo" | "live";
 
 function toEaMode(v: unknown): EaMode {
@@ -255,6 +261,27 @@ Deno.serve(async (req: Request) => {
       console.error("[mt5-get-instructions] ea_connections upsert failed:", upsertErr.message);
     }
 
+    const disableDispatch = envEnabled("EA_DISABLE_INSTRUCTION_DISPATCH", false);
+    if (disableDispatch) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          instructions: [],
+          debug: {
+            dispatch_disabled: true,
+            reason: "EA_DISABLE_INSTRUCTION_DISPATCH enabled",
+          },
+          connection_registered: !upsertErr,
+          ...(upsertErr && { connection_error: upsertErr.message }),
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const maxActiveSignalsFetch = Math.max(
+      1,
+      Math.min(500, Number(Deno.env.get("EA_MAX_ACTIVE_SIGNALS_FETCH") || 50)),
+    );
     // Pull newest active signals; include mt5_symbol so EA gets the symbol name used in MT5 Market Watch
     const { data: signals, error: sigErr } = await supabase
       .from("signals")
@@ -262,7 +289,7 @@ Deno.serve(async (req: Request) => {
       .eq("is_active", true)
       .eq("signal_status", "ACTIVE")
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(maxActiveSignalsFetch);
 
     if (sigErr) throw sigErr;
     const sigList = signals || [];
@@ -412,6 +439,12 @@ Deno.serve(async (req: Request) => {
     const instructions: any[] = [];
     const skippedByReason: Record<string, number> = {};
     const skippedSignals: Array<{ signal_id: string; symbol: string; reason: string }> = [];
+    const perf = {
+      active_signals_fetched: sigList.length,
+      candidate_signals_processed: 0,
+      trade_rows_prefetched: signalIds.length > 0 ? [...rowsBySignal.values()].reduce((n, a) => n + a.length, 0) : 0,
+      dispatched_count: 0,
+    };
     const recordSkip = (reason: string, signalId: string, symbol: string) => {
       skippedByReason[reason] = (skippedByReason[reason] || 0) + 1;
       if (skippedSignals.length < 20) {
@@ -421,6 +454,7 @@ Deno.serve(async (req: Request) => {
     /** Avoid emitting two instructions for the same symbol in one response */
     const symbolsDispatchedThisPoll = new Set<string>();
     for (const s of sigList) {
+      perf.candidate_signals_processed += 1;
       const id = String(s.id);
       const symbolCode = String(s.symbol || "").trim();
       if (executed.has(id)) {
@@ -612,11 +646,14 @@ Deno.serve(async (req: Request) => {
         // EA uses this to match server first-dispatch window (see MaxSignalAgeSeconds in .mq5)
         max_signal_age_seconds: maxSignalAgeSec,
       });
+      perf.dispatched_count += 1;
       symbolsDispatchedThisPoll.add(symbolCode);
       if (instructions.length >= max) break;
     }
 
-    console.log(`[mt5-get-instructions] mt5_login=${mt5_loginStored} active_signals=${sigList.length} already_executed=${executed.size} instructions=${instructions.length}`);
+    console.log(
+      `[mt5-get-instructions] mt5_login=${mt5_loginStored} active_signals=${sigList.length} candidates=${perf.candidate_signals_processed} trade_rows_prefetched=${perf.trade_rows_prefetched} already_executed=${executed.size} instructions=${instructions.length}`,
+    );
 
     return new Response(
       JSON.stringify({
@@ -630,6 +667,13 @@ Deno.serve(async (req: Request) => {
           skipped_by_reason: skippedByReason,
           skipped_signals: skippedSignals,
           signal_max_age_seconds: maxSignalAgeSec,
+          perf,
+          controls: {
+            requested_max: requestedMax,
+            effective_max: max,
+            active_signals_fetch_limit: maxActiveSignalsFetch,
+            dispatch_disabled: disableDispatch,
+          },
         },
         connection_registered: !upsertErr,
         ...(upsertErr && { connection_error: upsertErr.message }),
