@@ -1,5 +1,5 @@
-//Advance-signal-detector old
 import { TechnicalAnalyzer, TickData, Candle, TechnicalIndicators } from './technical-indicators.ts';
+import { getPointSize } from './symbol-sl-tp.ts';
 
 export interface SignalTrigger {
   indicatorName: string;
@@ -25,17 +25,41 @@ export interface SignalDetectionResult {
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
+  tp1?: number;
   reasoning: string;
+  /** For ICT refinement: support/resistance from structure (when direction is set) */
+  supportLevels?: number[];
+  resistanceLevels?: number[];
+  /** ATR for ICT refiner (when direction is set) */
+  atr?: number;
+}
+
+/** Config: use points (per-symbol) when set; otherwise ATR multipliers. */
+export interface SignalDetectorConfig {
+  slPoints?: number;
+  tpPoints?: number;
+  atrSlMultiplier?: number;
+  atrTpMultiplier?: number;
 }
 
 export class AdvancedSignalDetector {
   private analyzer: TechnicalAnalyzer;
-  private minTriggers: number = 4;
-  private minConfidence: number = 20;
-  private minRiskReward: number = 1.5;
+  private minTriggers: number = 3;
+  private minConfidence: number = 33;
+  private minRiskReward: number = 1.2;
+  private atrSlMultiplier: number;
+  private atrTpMultiplier: number;
+  private slPoints: number | null = null;
+  private tpPoints: number | null = null;
 
-  constructor(ticks: TickData[]) {
+  constructor(ticks: TickData[], config?: SignalDetectorConfig) {
     this.analyzer = new TechnicalAnalyzer(ticks);
+    this.atrSlMultiplier = config?.atrSlMultiplier ?? 1.5;
+    this.atrTpMultiplier = config?.atrTpMultiplier ?? 2.5;
+    if (config?.slPoints != null && config?.tpPoints != null && config.slPoints > 0 && config.tpPoints > 0) {
+      this.slPoints = config.slPoints;
+      this.tpPoints = config.tpPoints;
+    }
   }
 
   private ticksToCandles(ticks: TickData[], interval: number = 60): Candle[] {
@@ -223,27 +247,10 @@ export class AdvancedSignalDetector {
       });
     }
 
-    // Bollinger Bands
-    if (currentPrice < indicators.bollingerBands.lower) {
-      triggers.push({
-        indicatorName: 'Bollinger Bands',
-        indicatorValue: currentPrice,
-        triggerCondition: 'Price below lower band (Oversold - Bullish signal)',
-        timeframe
-      });
-    } else if (currentPrice > indicators.bollingerBands.upper) {
-      triggers.push({
-        indicatorName: 'Bollinger Bands',
-        indicatorValue: currentPrice,
-        triggerCondition: 'Price above upper band (Overbought - Bearish signal)',
-        timeframe
-      });
-    }
-
-    // EMA Crossover
+    // EMA Crossover (relaxed threshold 0.25% so trend confirmation fires more often)
     if (indicators.ema12 > indicators.ema26) {
       const crossoverStrength = ((indicators.ema12 - indicators.ema26) / indicators.ema26) * 100;
-      if (crossoverStrength > 0.5) {
+      if (crossoverStrength > 0.25) {
         triggers.push({
           indicatorName: 'EMA Crossover',
           indicatorValue: crossoverStrength,
@@ -253,7 +260,7 @@ export class AdvancedSignalDetector {
       }
     } else if (indicators.ema12 < indicators.ema26) {
       const crossoverStrength = ((indicators.ema26 - indicators.ema12) / indicators.ema26) * 100;
-      if (crossoverStrength > 0.5) {
+      if (crossoverStrength > 0.25) {
         triggers.push({
           indicatorName: 'EMA Crossover',
           indicatorValue: crossoverStrength,
@@ -288,68 +295,105 @@ export class AdvancedSignalDetector {
     entryPrice: number,
     atr: number,
     supportLevels: number[],
-    resistanceLevels: number[]
-  ): { stopLoss: number; takeProfit: number; rr: number } {
-    const slMultiplier = 1;
-    let riskAmount = atr * slMultiplier;
+    resistanceLevels: number[],
+    _symbol: string
+  ): { stopLoss: number; takeProfit: number; tp1: number; rr: number } {
+    const atrSafe = Math.max(atr, entryPrice * 0.001);
+    const symbol = _symbol?.trim() || '';
+    // When using points: convert Deriv "points" (display units) to price distance via point size.
+    const pointSize = getPointSize(symbol);
+    let slDistance = this.slPoints != null && this.tpPoints != null
+      ? this.slPoints * pointSize
+      : atrSafe * this.atrSlMultiplier;
+    let tpDistance = this.slPoints != null && this.tpPoints != null
+      ? this.tpPoints * pointSize
+      : atrSafe * this.atrTpMultiplier;
 
-    const minRiskPercentage = 0.015;
-    const minRiskAmount = entryPrice * minRiskPercentage;
-    if (riskAmount < minRiskAmount) {
-      riskAmount = minRiskAmount;
+    // Cap point-based distances so SL/TP stay valid (no negative or extreme levels)
+    if (this.slPoints != null && this.tpPoints != null) {
+      const maxSl = entryPrice * 0.5;
+      const maxTp = entryPrice * 2;
+      if (direction === 'BUY') {
+        slDistance = Math.min(slDistance, maxSl);
+        tpDistance = Math.min(tpDistance, maxTp);
+      } else {
+        slDistance = Math.min(slDistance, maxTp);
+        tpDistance = Math.min(tpDistance, maxSl);
+      }
     }
-
-    const rewardMultiplier = 3;
 
     let stopLoss: number;
-    let takeProfit: number;
+    let tp1: number;
+
+    const useFixedPoints = this.slPoints != null && this.tpPoints != null;
 
     if (direction === 'BUY') {
-      stopLoss = entryPrice - riskAmount;
-      takeProfit = entryPrice + (riskAmount * rewardMultiplier);
+      stopLoss = entryPrice - slDistance;
+      tp1 = entryPrice + tpDistance;
 
-      if (supportLevels.length > 0) {
-        const nearestSupport = supportLevels
-          .filter(s => s < entryPrice)
-          .sort((a, b) => b - a)[0];
-        if (nearestSupport) {
-          const supportDistance = entryPrice - nearestSupport;
-          if (supportDistance > riskAmount * 0.3 && supportDistance < riskAmount * 2) {
-            stopLoss = nearestSupport - (atr * 0.5);
-            const newRisk = entryPrice - stopLoss;
-            takeProfit = entryPrice + (newRisk * rewardMultiplier);
+      if (!useFixedPoints) {
+        if (supportLevels.length > 0) {
+          const nearestSupport = supportLevels
+            .filter(s => s < entryPrice && s > stopLoss)
+            .sort((a, b) => b - a)[0];
+          if (nearestSupport) {
+            const candidateSL = nearestSupport - (atrSafe * 0.5);
+            if (candidateSL < entryPrice && entryPrice - candidateSL >= slDistance * 0.5) {
+              stopLoss = candidateSL;
+            }
+          }
+        }
+        if (resistanceLevels.length > 0) {
+          const nearestResistance = resistanceLevels
+            .filter(r => r > entryPrice && r <= entryPrice + tpDistance * 1.5)
+            .sort((a, b) => a - b)[0];
+          if (nearestResistance) {
+            tp1 = Math.min(nearestResistance - (atrSafe * 0.3), entryPrice + tpDistance * 1.5);
           }
         }
       }
+      stopLoss = Math.max(0.01, Math.min(stopLoss, entryPrice - 0.01));
+      tp1 = Math.max(entryPrice + 0.01, tp1);
     } else {
-      stopLoss = entryPrice + riskAmount;
-      takeProfit = entryPrice - (riskAmount * rewardMultiplier);
+      stopLoss = entryPrice + slDistance;
+      tp1 = entryPrice - tpDistance;
 
-      if (resistanceLevels.length > 0) {
-        const nearestResistance = resistanceLevels
-          .filter(r => r > entryPrice)
-          .sort((a, b) => a - b)[0];
-        if (nearestResistance) {
-          const resistanceDistance = nearestResistance - entryPrice;
-          if (resistanceDistance > riskAmount * 0.3 && resistanceDistance < riskAmount * 2) {
-            stopLoss = nearestResistance + (atr * 0.5);
-            const newRisk = stopLoss - entryPrice;
-            takeProfit = entryPrice - (newRisk * rewardMultiplier);
+      if (!useFixedPoints) {
+        if (resistanceLevels.length > 0) {
+          const nearestResistance = resistanceLevels
+            .filter(r => r > entryPrice && r < stopLoss)
+            .sort((a, b) => a - b)[0];
+          if (nearestResistance) {
+            const candidateSL = nearestResistance + (atrSafe * 0.5);
+            if (candidateSL > entryPrice && candidateSL - entryPrice >= slDistance * 0.5) {
+              stopLoss = candidateSL;
+            }
+          }
+        }
+        if (supportLevels.length > 0) {
+          const nearestSupport = supportLevels
+            .filter(s => s < entryPrice && s >= entryPrice - tpDistance * 1.5)
+            .sort((a, b) => b - a)[0];
+          if (nearestSupport) {
+            tp1 = Math.max(nearestSupport + (atrSafe * 0.3), entryPrice - tpDistance * 1.5);
           }
         }
       }
+      tp1 = Math.max(0.01, Math.min(tp1, entryPrice - 0.01));
+      stopLoss = Math.max(entryPrice + 0.01, stopLoss);
     }
 
-    const riskReward = Math.abs(takeProfit - entryPrice) / Math.abs(stopLoss - entryPrice);
+    const riskReward = Math.abs(tp1 - entryPrice) / Math.abs(stopLoss - entryPrice);
 
     return {
       stopLoss: parseFloat(stopLoss.toFixed(2)),
-      takeProfit: parseFloat(takeProfit.toFixed(2)),
+      takeProfit: parseFloat(tp1.toFixed(2)),
+      tp1: parseFloat(tp1.toFixed(2)),
       rr: parseFloat(riskReward.toFixed(2))
     };
   }
 
-  detectSignal(symbol: string, timeframe: string = 'M15'): SignalDetectionResult {
+  detectSignal(symbol: string, timeframe: string = 'M1'): SignalDetectionResult {
     try {
       const indicators = this.analyzer.calculateIndicators();
       const ticks = (this.analyzer as any).ticks as TickData[];
@@ -404,7 +448,7 @@ export class AdvancedSignalDetector {
           entryPrice: currentPrice,
           stopLoss: 0,
           takeProfit: 0,
-          reasoning: 'Insufficient signal strength. Need at least 3 confirming indicators with 75% confidence.'
+          reasoning: 'No trading signal detected yet.'
         };
       }
 
@@ -414,12 +458,13 @@ export class AdvancedSignalDetector {
         currentPrice,
         indicators.atr,
         analysis.supportLevels,
-        analysis.resistanceLevels
+        analysis.resistanceLevels,
+        symbol
       );
 
       // Calculate confidence
       const maxSignals = Math.max(bullishSignals, bearishSignals);
-      const totalPossibleSignals = 6; // RSI, MACD, BB, EMA, Trend, Patterns
+      const totalPossibleSignals = 5; // RSI, MACD, EMA, Trend, Patterns
       const confidence = Math.min(Math.round((maxSignals / totalPossibleSignals) * 100), 99);
 
       // Check quality thresholds
@@ -441,7 +486,11 @@ export class AdvancedSignalDetector {
         entryPrice: currentPrice,
         stopLoss: slTp.stopLoss,
         takeProfit: slTp.takeProfit,
-        reasoning
+        tp1: slTp.tp1,
+        reasoning,
+        supportLevels: analysis.supportLevels,
+        resistanceLevels: analysis.resistanceLevels,
+        atr: indicators.atr,
       };
     } catch (error) {
       return {
@@ -469,7 +518,7 @@ export class AdvancedSignalDetector {
   ): string {
     const parts: string[] = [];
 
-    parts.push(`${direction} signal detected with ${confidence}% confidence and ${rr}:1 risk-reward ratio.`);
+    parts.push(`${direction} signal detected with ${confidence}% confidence`);
 
     if (triggers.length > 0) {
       parts.push(`\n\nTechnical Triggers (${triggers.length}):`);
@@ -495,6 +544,7 @@ export class AdvancedSignalDetector {
   }
 }
 
-export function createSignalDetector(ticks: TickData[]): AdvancedSignalDetector {
-  return new AdvancedSignalDetector(ticks);
+export function createSignalDetector(ticks: TickData[], config?: SignalDetectorConfig): AdvancedSignalDetector {
+  return new AdvancedSignalDetector(ticks, config);
 }
+

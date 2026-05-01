@@ -13,7 +13,6 @@ export function Pricing() {
 
   const hasActiveSubscription = profile?.subscription_status === 'active';
   const isTrialing = profile?.subscription_status === 'trialing';
-  const hasStartedTrial = profile?.trial_started_at !== null && profile?.trial_started_at !== undefined;
   const trialEndsAt = profile?.trial_ends_at ? new Date(profile.trial_ends_at) : null;
   const trialDaysLeft = trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
 
@@ -40,8 +39,10 @@ export function Pricing() {
         ? import.meta.env.VITE_STRIPE_MONTHLY_PRICE_ID
         : import.meta.env.VITE_STRIPE_YEARLY_PRICE_ID;
 
-      if (!priceId || priceId.includes('xxxxxxxxxxxxx')) {
-        throw new Error('Stripe payment configuration is incomplete. Please contact support to complete your upgrade.');
+      if (!priceId?.trim() || priceId.includes('xxxxxxxxxxxxx')) {
+        throw new Error(
+          'Stripe price IDs are missing. In Stripe Dashboard → Products, copy each recurring Price ID (price_…) into .env as VITE_STRIPE_MONTHLY_PRICE_ID and VITE_STRIPE_YEARLY_PRICE_ID, then restart the dev server.',
+        );
       }
 
       const response = await fetch(
@@ -67,12 +68,13 @@ export function Pricing() {
         throw new Error(errorData.error || 'Failed to create checkout session');
       }
 
-      const { url } = await response.json();
-      if (url) {
-        // Set a flag so we know to refresh profile when returning
-        localStorage.setItem('stripe_checkout_started', 'true');
-        window.location.href = url;
+      const data = await response.json();
+      const url = typeof data?.url === 'string' ? data.url : '';
+      if (!url) {
+        throw new Error('Checkout session did not return a payment URL. Please try again or contact support.');
       }
+      localStorage.setItem('stripe_checkout_started', 'true');
+      window.location.href = url;
     } catch (err: any) {
       console.error('Checkout error:', err);
       setError(err.message || 'Failed to start checkout. Please try again.');
@@ -96,7 +98,7 @@ export function Pricing() {
 
   return (
     <ProtectedRoute>
-      <DashboardLayout>
+      <DashboardLayout currentPage="pricing">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center mb-12">
             <h1 className="text-4xl md:text-5xl font-bold text-black dark:text-white mb-4">
@@ -104,8 +106,8 @@ export function Pricing() {
             </h1>
 
           {!hasActiveSubscription && !isTrialing && (
-            <p className="text-xl text-slate-600 dark:text-slate-300 mb-8">
-              Get 3 days free when you connect your MT5 account
+            <p className="text-xl text-slate-300 mb-8">
+              Subscribe anytime, or connect your MT5 account to start a 3-day free trial first
             </p>
           )}
 
@@ -173,8 +175,8 @@ export function Pricing() {
                   Billed ${yearlyPrice} annually
                 </p>
               )}
-              <p className="text-emerald-600 dark:text-emerald-400 font-medium mt-4 text-lg">
-                3-day free trial included
+              <p className="text-emerald-400 font-medium mt-4 text-lg">
+                3-day free trial when you connect MT5 (optional before subscribing)
               </p>
             </div>
 
@@ -188,13 +190,8 @@ export function Pricing() {
             </div>
 
             <button
-              onClick={() => {
-                if (!hasStartedTrial) {
-                  window.location.hash = 'settings';
-                } else {
-                  handleSubscribe(billingInterval);
-                }
-              }}
+              type="button"
+              onClick={() => void handleSubscribe(billingInterval)}
               disabled={loading || hasActiveSubscription}
               className={`w-full py-4 px-6 rounded-lg font-semibold text-lg transition-all ${
                 hasActiveSubscription
@@ -209,8 +206,6 @@ export function Pricing() {
                 </span>
               ) : hasActiveSubscription ? (
                 'Already Subscribed'
-              ) : isTrialing ? (
-                'Subscribe Now'
               ) : (
                 'Subscribe Now'
               )}

@@ -42,6 +42,12 @@ const MODEL = 'gpt-4o-mini';
 const MAX_TOKENS = 400;
 
 function buildPrompt(input: ICTRefinerInput): string {
+  const asNum = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : NaN);
+  const fmt = (v: unknown, dp = 2): string => {
+    const n = asNum(v);
+    return Number.isFinite(n) ? n.toFixed(dp) : 'n/a';
+  };
+
   const {
     symbol,
     direction,
@@ -59,21 +65,25 @@ function buildPrompt(input: ICTRefinerInput): string {
     triggerSummary,
   } = input;
 
+  // Backward-compatible fallback if callers still send deprecated swing names.
+  const manipHigh = Number.isFinite(asNum(manipulation_high)) ? manipulation_high : asNum(input.recentSwingHigh);
+  const manipLow = Number.isFinite(asNum(manipulation_low)) ? manipulation_low : asNum(input.recentSwingLow);
+
   return `You are an expert ICT (Inner Circle Trader) trader. A ${direction} setup is CONFIRMED on ${symbol}. Refine entry and stop loss. Take profit will be set from risk by the system.
 
 **Critical — stops vs liquidity sweeps**
-Recent-range HIGH ${manipulation_high.toFixed(2)} and LOW ${manipulation_low.toFixed(2)} mark where stops cluster. Price often **wicks through** those levels first, then moves in your direction. SL placed on or just inside those levels gets hunted. Place SL **past** the sweep (structural invalidation), not on the pool.
+Recent-range HIGH ${fmt(manipHigh)} and LOW ${fmt(manipLow)} mark where stops cluster. Price often **wicks through** those levels first, then moves in your direction. SL placed on or just inside those levels gets hunted. Place SL **past** the sweep (structural invalidation), not on the pool.
 
 **Context**
-- Direction: ${direction}, price: ${currentPrice.toFixed(2)}, ATR: ${atr.toFixed(2)}
-- Support: ${supportLevels.slice(0, 5).map(s => s.toFixed(2)).join(', ') || 'none'}
-- Resistance: ${resistanceLevels.slice(0, 5).map(r => r.toFixed(2)).join(', ') || 'none'}
+- Direction: ${direction}, price: ${fmt(currentPrice)}, ATR: ${fmt(atr)}
+- Support: ${supportLevels.slice(0, 5).map(s => fmt(s)).join(', ') || 'none'}
+- Resistance: ${resistanceLevels.slice(0, 5).map(r => fmt(r)).join(', ') || 'none'}
 
-**Detector reference**: Entry ${initialEntry.toFixed(2)}, SL ${initialStopLoss.toFixed(2)}, TP ${initialTp1.toFixed(2)} | ${triggerSummary}
+**Detector reference**: Entry ${fmt(initialEntry)}, SL ${fmt(initialStopLoss)}, TP ${fmt(initialTp1)} | ${triggerSummary}
 
 **Rules**
-1. **BUY**: stop_loss must be **below** ${manipulation_low.toFixed(2)} by at least **1.0–2.0× ATR** (never at/above that low).
-2. **SELL**: stop_loss must be **above** ${manipulation_high.toFixed(2)} by at least **1.0–2.0× ATR** (never at/below that high).
+1. **BUY**: stop_loss must be **below** ${fmt(manipLow)} by at least **1.0–2.0× ATR** (never at/above that low).
+2. **SELL**: stop_loss must be **above** ${fmt(manipHigh)} by at least **1.0–2.0× ATR** (never at/below that high).
 3. Sensible entry between SL and profit side.
 
 Respond with ONLY JSON:

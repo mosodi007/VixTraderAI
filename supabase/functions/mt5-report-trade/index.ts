@@ -198,7 +198,20 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Shared `signals` rows are not closed when a single user's trade closes; outcomes are per-user on `trades`.
+    // Global shared-signal lifecycle: close signal when any linked trade closes.
+    if (status === "closed") {
+      const derivedOutcome = (profit_loss || 0) >= 0 ? "TP1_HIT" : "SL_HIT";
+      const closePrice = exit_price ?? entry_price ?? null;
+      const { error: signalOutcomeErr } = await supabase.rpc("update_signal_outcome", {
+        p_signal_id: signal_id,
+        p_outcome: derivedOutcome,
+        p_close_price: closePrice,
+        p_profit_loss: profit_loss || 0,
+      });
+      if (signalOutcomeErr) {
+        console.warn("[mt5-report-trade] update_signal_outcome warning:", signalOutcomeErr.message);
+      }
+    }
 
     return new Response(
       JSON.stringify({ success: true }),

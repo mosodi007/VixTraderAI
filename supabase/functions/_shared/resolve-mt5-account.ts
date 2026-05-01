@@ -69,8 +69,18 @@ export async function resolveMt5Account(
   }
 
   const found =
-    (scanRows as Mt5AccountRow[] | null)?.find(
+    ((scanRows as Mt5AccountRow[] | null) || []).filter(
       (r) => canonicalMt5Login(String(r.mt5_login || "")) === target,
-    ) ?? null;
-  return found;
+    );
+
+  if (found.length === 1) return found[0];
+  if (found.length > 1) {
+    // Ambiguous canonical login (e.g. "00123" and "123"). Returning a random row routes
+    // multiple MT5 accounts to one owner/login, so fail closed and force explicit cleanup.
+    console.warn(
+      `[resolve-mt5-account] ambiguous canonical login "${target}" matches ${found.length} rows; refusing to auto-resolve`,
+    );
+    return null;
+  }
+  return null;
 }

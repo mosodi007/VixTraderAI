@@ -97,6 +97,12 @@ function toMillis(v: string | null | undefined): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+function envEnabled(name: string, fallback: boolean = false): boolean {
+  const raw = String(Deno.env.get(name) ?? "").trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
 type EaMode = "demo" | "live";
 
 function toEaMode(v: unknown): EaMode {
@@ -178,7 +184,16 @@ Deno.serve(async (req: Request) => {
 
     const mt5_loginRaw = body.mt5_login;
     const mt5_login = String(mt5_loginRaw != null ? mt5_loginRaw : "").trim();
-    const max = Math.max(1, Math.min(20, Number(body.max) || 5));
+    const requestedMax = Number((body as any).max);
+    const defaultMax = Math.max(10, Number(Deno.env.get("EA_INSTRUCTIONS_DEFAULT_MAX") || 100));
+    // Allow larger fan-out per poll; EA can still pass a smaller explicit max if desired.
+    const max = Math.max(
+      1,
+      Math.min(
+        1000,
+        Number.isFinite(requestedMax) && requestedMax > 0 ? Math.floor(requestedMax) : defaultMax,
+      ),
+    );
     const ea_mode = toEaMode((body as any).ea_mode);
 
     if (!mt5_login) {
@@ -205,6 +220,7 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({
           success: false,
           error: "Unauthorized Account: Go to https://vixai.trade to add this account",
+          requested_mt5_login: mt5_login,
         }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
@@ -245,6 +261,27 @@ Deno.serve(async (req: Request) => {
       console.error("[mt5-get-instructions] ea_connections upsert failed:", upsertErr.message);
     }
 
+    const disableDispatch = envEnabled("EA_DISABLE_INSTRUCTION_DISPATCH", false);
+    if (disableDispatch) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          instructions: [],
+          debug: {
+            dispatch_disabled: true,
+            reason: "EA_DISABLE_INSTRUCTION_DISPATCH enabled",
+          },
+          connection_registered: !upsertErr,
+          ...(upsertErr && { connection_error: upsertErr.message }),
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const maxActiveSignalsFetch = Math.max(
+      1,
+      Math.min(500, Number(Deno.env.get("EA_MAX_ACTIVE_SIGNALS_FETCH") || 50)),
+    );
     // Pull newest active signals; include mt5_symbol so EA gets the symbol name used in MT5 Market Watch
     const { data: signals, error: sigErr } = await supabase
       .from("signals")
@@ -252,7 +289,7 @@ Deno.serve(async (req: Request) => {
       .eq("is_active", true)
       .eq("signal_status", "ACTIVE")
       .order("created_at", { ascending: false })
-      .limit(50);
+      .limit(maxActiveSignalsFetch);
 
     if (sigErr) throw sigErr;
     const sigList = signals || [];
@@ -312,54 +349,102 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Get already-executed signal_ids for this account.
-    // We only treat signals as executed once the trade is actually "open" or "closed".
-    const { data: executedTrades, error: trErr } = await supabase
-      .from("trades")
-      .select("signal_id,status")
-      .eq("mt5_login", mt5_loginStored)
-      .not("signal_id", "is", null)
-      .in("status", ["open", "closed"])
-      .order("created_at", { ascending: false })
-      .limit(500);
+    const { data: globalSltpRows, error: globalSltpErr } = await supabase
+      .from("symbol_sl_tp_config")
+      .select("symbol, sl_points, tp_points");
+    if (globalSltpErr) {
+      console.warn("[mt5-get-instructions] symbol_sl_tp_config load failed:", globalSltpErr.message);
+    }
+    const globalSltpBySymbol = new Map<string, { sl_points: number; tp_points: number }>();
+    for (const r of globalSltpRows || []) {
+      const sym = String((r as any).symbol || "").trim();
+      const sl = Number((r as any).sl_points);
+      const tp = Number((r as any).tp_points);
+      if (!sym || !Number.isFinite(sl) || !Number.isFinite(tp) || sl <= 0 || tp <= 0) continue;
+      globalSltpBySymbol.set(sym, { sl_points: sl, tp_points: tp });
+    }
 
-    if (trErr) throw trErr;
-    const executed = new Set((executedTrades || []).map((t: any) => String(t.signal_id)));
+    // Batch-load trade rows for this account and active signals in ONE query
+    // (avoids N-per-signal roundtrips, critical when many MT5s poll at once).
+    const signalIds = [...new Set((sigList || []).map((s: any) => String((s as any).id || "")).filter(Boolean))];
+    const rowsBySignal = new Map<string, any[]>();
+    const executed = new Set<string>();
+    let inFlightTrades: any[] = [];
+    let inFlightIds: string[] = [];
+    if (signalIds.length > 0) {
+      const { data: tradeRows, error: tradeRowsErr } = await supabase
+        .from("trades")
+        .select("id,signal_id,status,created_at,opened_at")
+        .eq("mt5_login", mt5_loginStored)
+        .in("signal_id", signalIds)
+        .order("created_at", { ascending: false });
+      if (tradeRowsErr) throw tradeRowsErr;
+      for (const r of tradeRows || []) {
+        const sid = String((r as any).signal_id || "");
+        if (!sid) continue;
+        const arr = rowsBySignal.get(sid) || [];
+        arr.push(r);
+        rowsBySignal.set(sid, arr);
+        const st = String((r as any).status || "").toLowerCase();
+        if (st === "open" || st === "closed") executed.add(sid);
+      }
+      inFlightTrades = (tradeRows || []).filter((r: any) => {
+        const st = String((r as any).status || "").toLowerCase();
+        return st === "sent" || st === "open";
+      });
+      inFlightIds = [...new Set(inFlightTrades.map((t: any) => String(t.signal_id || "")).filter(Boolean))];
+    }
 
-    // One in-flight trade per Deriv symbol per MT5 account: sent/open on a symbol blocks other
-    // signals for that symbol only; other symbols can still receive instructions.
-    const { data: inFlightTrades, error: ifErr } = await supabase
-      .from("trades")
-      .select("signal_id")
-      .eq("mt5_login", mt5_loginStored)
-      .in("status", ["sent", "open"])
-      .not("signal_id", "is", null);
-
-    if (ifErr) throw ifErr;
-    const inFlightIds = [...new Set((inFlightTrades || []).map((t: any) => String(t.signal_id)))];
+    // One in-flight trade per Deriv symbol: blocks other signals for that symbol.
+    // Important: a stale `sent` row for a signal that is no longer ACTIVE must NOT block
+    // newer signals (otherwise the EA never picks up the new instruction after rotation/expiry).
+    // `open` always blocks until the position is closed.
     const inFlightBySymbol = new Map<string, string>();
     if (inFlightIds.length > 0) {
-      const { data: symRows, error: symErr } = await supabase
+      const { data: inflightSigRows, error: inflightSigErr } = await supabase
         .from("signals")
-        .select("id, symbol")
+        .select("id, symbol, is_active, signal_status")
         .in("id", inFlightIds);
-      if (symErr) throw symErr;
-      for (const row of symRows || []) {
-        const sym = String((row as any).symbol || "").trim();
+      if (inflightSigErr) throw inflightSigErr;
+      const signalBlockingMeta = new Map<string, { symbol: string; stillActive: boolean }>();
+      for (const row of inflightSigRows || []) {
         const sid = String((row as any).id);
-        if (sym) inFlightBySymbol.set(sym, sid);
+        const sym = String((row as any).symbol || "").trim();
+        const stillActive =
+          (row as any).is_active === true && String((row as any).signal_status || "").toUpperCase() === "ACTIVE";
+        if (sid) signalBlockingMeta.set(sid, { symbol: sym, stillActive });
+      }
+      for (const t of inFlightTrades || []) {
+        const sid = String((t as any).signal_id || "");
+        const st = String((t as any).status || "").toLowerCase();
+        if (!sid) continue;
+        const meta = signalBlockingMeta.get(sid);
+        const sym = meta?.symbol?.trim() || "";
+        if (!sym) continue;
+        if (st === "open") {
+          inFlightBySymbol.set(sym, sid);
+        } else if (st === "sent" && meta?.stillActive) {
+          inFlightBySymbol.set(sym, sid);
+        }
       }
     }
     const dispatchRetrySeconds = Math.max(15, Number(Deno.env.get("DISPATCH_RETRY_SECONDS") || 120));
     // Skip stale ACTIVE signals on first dispatch (new EA / new account): avoids opening far from entry.
     // Retries when a "sent" row already exist are still allowed. Set to 0 to disable.
+    // Default 900s: slow EA poll intervals often missed the old 300s window and never got a first dispatch.
     const rawMaxAge = Deno.env.get("SIGNAL_INSTRUCTION_MAX_AGE_SECONDS");
     const maxSignalAgeSec =
-      rawMaxAge === "" || rawMaxAge == null ? 300 : Number(rawMaxAge);
+      rawMaxAge === "" || rawMaxAge == null ? 900 : Number(rawMaxAge);
 
     const instructions: any[] = [];
     const skippedByReason: Record<string, number> = {};
     const skippedSignals: Array<{ signal_id: string; symbol: string; reason: string }> = [];
+    const perf = {
+      active_signals_fetched: sigList.length,
+      candidate_signals_processed: 0,
+      trade_rows_prefetched: signalIds.length > 0 ? [...rowsBySignal.values()].reduce((n, a) => n + a.length, 0) : 0,
+      dispatched_count: 0,
+    };
     const recordSkip = (reason: string, signalId: string, symbol: string) => {
       skippedByReason[reason] = (skippedByReason[reason] || 0) + 1;
       if (skippedSignals.length < 20) {
@@ -369,6 +454,7 @@ Deno.serve(async (req: Request) => {
     /** Avoid emitting two instructions for the same symbol in one response */
     const symbolsDispatchedThisPoll = new Set<string>();
     for (const s of sigList) {
+      perf.candidate_signals_processed += 1;
       const id = String(s.id);
       const symbolCode = String(s.symbol || "").trim();
       if (executed.has(id)) {
@@ -408,10 +494,23 @@ Deno.serve(async (req: Request) => {
       const entryPrice = Number(s.entry_price) || 0;
       const userSlPts = settings?.sl_points;
       const userTpPts = settings?.tp_points;
-      if (userSlPts != null && Number(userSlPts) > 0 && entryPrice > 0) {
-        const slPoints = Math.max(1, Number(userSlPts));
+      const globalCfg = globalSltpBySymbol.get(symbolCode);
+      const effectiveSlPts =
+        userSlPts != null && Number(userSlPts) > 0
+          ? Number(userSlPts)
+          : globalCfg != null
+            ? globalCfg.sl_points
+            : null;
+      const effectiveTpPts =
+        userTpPts != null && Number(userTpPts) > 0
+          ? Number(userTpPts)
+          : globalCfg != null
+            ? globalCfg.tp_points
+            : null;
+      if (effectiveSlPts != null && effectiveSlPts > 0 && entryPrice > 0) {
+        const slPoints = Math.max(1, effectiveSlPts);
         const tpPoints =
-          userTpPts != null && Number(userTpPts) > 0 ? Math.max(1, Number(userTpPts)) : slPoints * 3;
+          effectiveTpPts != null && effectiveTpPts > 0 ? Math.max(1, effectiveTpPts) : slPoints * 3;
         const pointSize = getPointSize(symbolCode);
         const slDist = slPoints * pointSize;
         const tpDist = tpPoints * pointSize;
@@ -447,18 +546,7 @@ Deno.serve(async (req: Request) => {
       // Dispatch lock: avoid duplicate "sent" rows on repeated EA polls.
       // Retry a "sent" dispatch only after DISPATCH_RETRY_SECONDS.
       const nowIso = new Date().toISOString();
-      const { data: recentRows, error: recentErr } = await supabase
-        .from("trades")
-        .select("id,status,created_at,opened_at")
-        .eq("mt5_login", mt5_loginStored)
-        .eq("signal_id", id)
-        .order("created_at", { ascending: false })
-        .limit(10);
-      if (recentErr) {
-        console.warn("[mt5-get-instructions] dispatch precheck failed:", recentErr.message);
-      }
-
-      const rows = recentRows || [];
+      const rows = rowsBySignal.get(id) || [];
       const hasExecutedRow = rows.some((r: any) => ["open", "closed"].includes(String(r.status || "")));
       if (hasExecutedRow) {
         executed.add(id);
@@ -529,6 +617,10 @@ Deno.serve(async (req: Request) => {
         recordSkip("dispatch_write_failed", id, symbolCode);
         continue;
       }
+      // Keep in-memory view aligned for this request lifecycle.
+      const localRows = rowsBySignal.get(id) || [];
+      localRows.unshift({ id: sentRow?.id || null, status: "sent", opened_at: nowIso, created_at: nowIso });
+      rowsBySignal.set(id, localRows);
 
       instructions.push({
         signal_id: id,
@@ -551,12 +643,17 @@ Deno.serve(async (req: Request) => {
         signal_created_at: (s as any).created_at ?? null,
         signal_age_seconds: Math.floor(signalAgeSec),
         is_retry_dispatch: sentRow ? 1 : 0,
+        // EA uses this to match server first-dispatch window (see MaxSignalAgeSeconds in .mq5)
+        max_signal_age_seconds: maxSignalAgeSec,
       });
+      perf.dispatched_count += 1;
       symbolsDispatchedThisPoll.add(symbolCode);
       if (instructions.length >= max) break;
     }
 
-    console.log(`[mt5-get-instructions] mt5_login=${mt5_loginStored} active_signals=${sigList.length} already_executed=${executed.size} instructions=${instructions.length}`);
+    console.log(
+      `[mt5-get-instructions] mt5_login=${mt5_loginStored} active_signals=${sigList.length} candidates=${perf.candidate_signals_processed} trade_rows_prefetched=${perf.trade_rows_prefetched} already_executed=${executed.size} instructions=${instructions.length}`,
+    );
 
     return new Response(
       JSON.stringify({
@@ -570,6 +667,13 @@ Deno.serve(async (req: Request) => {
           skipped_by_reason: skippedByReason,
           skipped_signals: skippedSignals,
           signal_max_age_seconds: maxSignalAgeSec,
+          perf,
+          controls: {
+            requested_max: requestedMax,
+            effective_max: max,
+            active_signals_fetch_limit: maxActiveSignalsFetch,
+            dispatch_disabled: disableDispatch,
+          },
         },
         connection_registered: !upsertErr,
         ...(upsertErr && { connection_error: upsertErr.message }),
