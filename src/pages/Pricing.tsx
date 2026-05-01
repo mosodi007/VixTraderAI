@@ -101,7 +101,7 @@ export function Pricing() {
       <DashboardLayout currentPage="pricing">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center mb-12">
-            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+            <h1 className="text-4xl md:text-5xl font-bold text-black dark:text-white mb-4">
               Simple, Transparent Pricing
             </h1>
 
@@ -113,7 +113,7 @@ export function Pricing() {
 
           {isTrialing && trialDaysLeft > 0 && (
             <div className="inline-block bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-6 py-3 mb-8">
-              <p className="text-emerald-400 font-medium">
+              <p className="text-emerald-600 dark:text-emerald-400 font-medium">
                 You have {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left in your free trial
               </p>
             </div>
@@ -121,7 +121,7 @@ export function Pricing() {
 
           {hasActiveSubscription && (
             <div className="inline-block bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-6 py-3 mb-8">
-              <p className="text-emerald-400 font-medium">
+              <p className="text-emerald-600 dark:text-emerald-400 font-medium">
                 You have an active Pro subscription
               </p>
             </div>
@@ -133,7 +133,7 @@ export function Pricing() {
               className={`px-6 py-3 rounded-lg font-medium transition-all ${
                 billingInterval === 'monthly'
                   ? 'bg-emerald-600 text-white shadow-lg'
-                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  : 'bg-slate-200 dark:bg-slate-700 text-black dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
               }`}
             >
               Monthly
@@ -143,7 +143,7 @@ export function Pricing() {
               className={`px-6 py-3 rounded-lg font-medium transition-all relative ${
                 billingInterval === 'yearly'
                   ? 'bg-emerald-600 text-white shadow-lg'
-                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  : 'bg-slate-200 dark:bg-slate-700 text-black dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
               }`}
             >
               Yearly
@@ -156,22 +156,22 @@ export function Pricing() {
 
         {error && (
           <div className="max-w-2xl mx-auto mb-8 bg-red-500/10 border border-red-500/30 rounded-lg px-6 py-4">
-            <p className="text-red-400">{error}</p>
+            <p className="text-red-600 dark:text-red-400">{error}</p>
           </div>
         )}
 
         <div className="max-w-2xl mx-auto">
-          <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl p-8 shadow-2xl">
+          <div className="bg-slate-100 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-300 dark:border-slate-700 rounded-2xl p-8 shadow-2xl">
             <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-white mb-4">Pro Plan</h2>
+              <h2 className="text-2xl font-bold text-black dark:text-white mb-4">Pro Plan</h2>
               <div className="flex items-baseline justify-center gap-2">
-                <span className="text-5xl font-bold text-white">
+                <span className="text-5xl font-bold text-black dark:text-white">
                   ${billingInterval === 'monthly' ? monthlyPrice : yearlyMonthlyEquivalent}
                 </span>
-                <span className="text-slate-400 text-lg">/month</span>
+                <span className="text-slate-600 dark:text-slate-400 text-lg">/month</span>
               </div>
               {billingInterval === 'yearly' && (
-                <p className="text-slate-400 mt-2">
+                <p className="text-slate-600 dark:text-slate-400 mt-2">
                   Billed ${yearlyPrice} annually
                 </p>
               )}
@@ -184,7 +184,7 @@ export function Pricing() {
               {features.map((feature, index) => (
                 <div key={index} className="flex items-start gap-3">
                   <Check className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                  <span className="text-slate-300">{feature}</span>
+                  <span className="text-slate-700 dark:text-slate-300">{feature}</span>
                 </div>
               ))}
             </div>
@@ -195,7 +195,7 @@ export function Pricing() {
               disabled={loading || hasActiveSubscription}
               className={`w-full py-4 px-6 rounded-lg font-semibold text-lg transition-all ${
                 hasActiveSubscription
-                  ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                  ? 'bg-slate-300 dark:bg-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed'
                   : 'bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white shadow-lg hover:shadow-emerald-500/25'
               }`}
             >
@@ -253,44 +253,44 @@ export function Pricing() {
                   }
                 }}
                 disabled={loading}
-                className="w-full mt-3 py-3 px-6 rounded-lg font-medium text-base transition-all bg-slate-700 hover:bg-slate-600 text-white"
+                className="w-full mt-3 py-3 px-6 rounded-lg font-medium text-base transition-all bg-slate-300 dark:bg-slate-700 hover:bg-slate-400 dark:hover:bg-slate-600 text-black dark:text-white"
               >
                 Manage Subscription
               </button>
             )}
 
-            <p className="text-center text-slate-400 text-sm mt-4">
+            <p className="text-center text-slate-600 dark:text-slate-400 text-sm mt-4">
               Cancel anytime. No questions asked.
             </p>
           </div>
         </div>
 
         <div className="mt-16 text-center">
-          <h3 className="text-2xl font-bold text-white mb-8">Frequently Asked Questions</h3>
+          <h3 className="text-2xl font-bold text-black dark:text-white mb-8">Frequently Asked Questions</h3>
           <div className="max-w-3xl mx-auto space-y-6">
-            <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-6 text-left">
-              <h4 className="text-lg font-semibold text-white mb-2">How does the free trial work?</h4>
-              <p className="text-slate-300">
+            <div className="bg-slate-100 dark:bg-slate-800/30 border border-slate-300 dark:border-slate-700 rounded-lg p-6 text-left">
+              <h4 className="text-lg font-semibold text-black dark:text-white mb-2">How does the free trial work?</h4>
+              <p className="text-slate-700 dark:text-slate-300">
                 When you connect your MT5 account, you get 3 days of full access to all Pro features at no cost.
                 No credit card required for the trial. After the trial ends, subscribe to continue receiving signals.
               </p>
             </div>
-            <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-6 text-left">
-              <h4 className="text-lg font-semibold text-white mb-2">Can I cancel anytime?</h4>
-              <p className="text-slate-300">
+            <div className="bg-slate-100 dark:bg-slate-800/30 border border-slate-300 dark:border-slate-700 rounded-lg p-6 text-left">
+              <h4 className="text-lg font-semibold text-black dark:text-white mb-2">Can I cancel anytime?</h4>
+              <p className="text-slate-700 dark:text-slate-300">
                 Yes! You can cancel your subscription at any time from your settings. You'll continue
                 to have access until the end of your billing period.
               </p>
             </div>
-            <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-6 text-left">
-              <h4 className="text-lg font-semibold text-white mb-2">What payment methods do you accept?</h4>
-              <p className="text-slate-300">
+            <div className="bg-slate-100 dark:bg-slate-800/30 border border-slate-300 dark:border-slate-700 rounded-lg p-6 text-left">
+              <h4 className="text-lg font-semibold text-black dark:text-white mb-2">What payment methods do you accept?</h4>
+              <p className="text-slate-700 dark:text-slate-300">
                 We accept all major credit cards through our secure payment processor, Stripe.
               </p>
             </div>
-            <div className="bg-slate-800/30 border border-slate-700 rounded-lg p-6 text-left">
-              <h4 className="text-lg font-semibold text-white mb-2">How much do I save with the annual plan?</h4>
-              <p className="text-slate-300">
+            <div className="bg-slate-100 dark:bg-slate-800/30 border border-slate-300 dark:border-slate-700 rounded-lg p-6 text-left">
+              <h4 className="text-lg font-semibold text-black dark:text-white mb-2">How much do I save with the annual plan?</h4>
+              <p className="text-slate-700 dark:text-slate-300">
                 The annual plan saves you 20% compared to paying monthly. That's over $48 in savings per year!
               </p>
             </div>
